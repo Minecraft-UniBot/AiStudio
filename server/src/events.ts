@@ -116,18 +116,82 @@ function normalize(raw: Record<string, unknown>): StudioEvent | null {
         type: 'permission.replied',
         permission_id: String(props.permissionID ?? ''),
       };
-    case 'question.updated': {
-      // 当前 SDK 版本未见 question 事件，保留防御性映射
-      const q = (props.question ?? {}) as Record<string, unknown>;
+    case 'question.asked': {
+      // opencode 1.18 实际事件类型为 question.asked（SDK 1.18 未生成对应类型），
+      // properties 直接就是 QuestionV1.Request：{ id, sessionID, questions[], tool? }。
+      // 每条提问：{ header, question, options: [{label, description}], multiple?, custom? }
+      const questions = Array.isArray(props.questions) ? (props.questions as unknown[]) : [];
       const question: QuestionRequest = {
-        id: String(q.questionID ?? q.id ?? ''),
+        id: String(props.id ?? ''),
         session_id: sessionId,
-        prompt: String(q.prompt ?? ''),
-        choices: Array.isArray(q.choices) ? q.choices.map((c) => String(c)) : [],
-        multiple: Boolean(q.multiple),
+        questions: questions
+          .map((raw) => {
+            const q = (raw ?? {}) as Record<string, unknown>;
+            const options = Array.isArray(q.options)
+              ? (q.options as unknown[]).map((o) => {
+                  const opt = (o ?? {}) as Record<string, unknown>;
+                  return {
+                    label: String(opt.label ?? ''),
+                    description: String(opt.description ?? ''),
+                  };
+                })
+              : [];
+            return {
+              header: String(q.header ?? ''),
+              question: String(q.question ?? ''),
+              options,
+              multiple: Boolean(q.multiple),
+              custom: q.custom === undefined ? true : Boolean(q.custom),
+            };
+          })
+          .filter((q) => q.question),
+        tool: (() => {
+          const t = props.tool as { messageID?: string; callID?: string } | undefined;
+          return t?.messageID && t.callID ? { messageID: t.messageID, callID: t.callID } : undefined;
+        })(),
       };
+      if (!question.id || question.questions.length === 0) return null;
       return { ...base, type: 'question.asked', question };
     }
+    // 兼容旧命名/防御：历史版本事件名可能是 question.updated
+    case 'question.updated': {
+      const q = (props.question ?? props) as Record<string, unknown>;
+      const questions = Array.isArray(q.questions) ? (q.questions as unknown[]) : [];
+      const question: QuestionRequest = {
+        id: String(q.id ?? q.questionID ?? ''),
+        session_id: sessionId,
+        questions: questions.map((raw) => {
+          const item = (raw ?? {}) as Record<string, unknown>;
+          const options = Array.isArray(item.options)
+            ? (item.options as unknown[]).map((o) => {
+                const opt = (o ?? {}) as Record<string, unknown>;
+                return { label: String(opt.label ?? ''), description: String(opt.description ?? '') };
+              })
+            : [];
+          return {
+            header: String(item.header ?? ''),
+            question: String(item.question ?? item.prompt ?? ''),
+            options,
+            multiple: Boolean(item.multiple),
+            custom: item.custom === undefined ? true : Boolean(item.custom),
+          };
+        }),
+      };
+      if (!question.id || question.questions.length === 0) return null;
+      return { ...base, type: 'question.asked', question };
+    }
+    case 'question.replied':
+      return {
+        ...base,
+        type: 'question.replied',
+        question_id: String(props.requestID ?? ''),
+      };
+    case 'question.rejected':
+      return {
+        ...base,
+        type: 'question.rejected',
+        question_id: String(props.requestID ?? ''),
+      };
     default:
       return null;
   }

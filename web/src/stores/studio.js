@@ -128,11 +128,17 @@ export const useStudioStore = defineStore('studio', () => {
     })
   }
 
-  async function replyQuestion(id, questionId, answer) {
+  /** 回答 AI 提问：answers 为每个问题的回答数组（元素为选项 label 或自定义文本） */
+  async function replyQuestion(id, questionId, answers) {
     await api(`/drafts/${id}/questions/${questionId}`, {
       method: 'POST',
-      body: { answer },
+      body: { answers },
     })
+  }
+
+  /** 忽略 AI 提问（question 工具继续执行但不采纳回答） */
+  async function rejectQuestion(id, questionId) {
+    await api(`/drafts/${id}/questions/${questionId}/reject`, { method: 'POST' })
   }
 
   // ---- 状态刷新 ----
@@ -234,6 +240,7 @@ export const useStudioStore = defineStore('studio', () => {
     publish,
     replyPermission,
     replyQuestion,
+    rejectQuestion,
     refreshCurrent,
     refreshMessages,
     restoreAfterReconnect,

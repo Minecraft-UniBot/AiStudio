@@ -95,6 +95,51 @@ class OpenCodeGateway {
     return this.client;
   }
 
+  /**
+   * 回答 question 请求（`POST /question/:requestID/reply`）。
+   *
+   * opencode 的 question 工具是挂起式的：模型调用后等待用户回答，只有通过该端点
+   * 回传 `{ answers: string[][] }`（每个问题一个数组，元素为选项 label）才会唤醒模型。
+   * SDK 1.18 未生成 question 客户端方法（types.gen 无 question 相关类型），因此复用
+   * SDK 底层 client 的 post（同一套 baseUrl / Authorization / 错误包装），不另起 fetch。
+   */
+  async questionReply(requestID: string, answers: string[][], directory: string): Promise<void> {
+    const raw = this.getClient() as unknown as {
+      _client: {
+        post(options: {
+          url: string;
+          query?: { directory?: string };
+          body?: unknown;
+          throwOnError?: boolean;
+        }): Promise<unknown>;
+      };
+    };
+    await raw._client.post({
+      url: `/question/${requestID}/reply`,
+      query: { directory },
+      body: { answers },
+      throwOnError: true,
+    });
+  }
+
+  /** 拒绝 question 请求（`POST /question/:requestID/reject`），模型继续但不采纳回答 */
+  async questionReject(requestID: string, directory: string): Promise<void> {
+    const raw = this.getClient() as unknown as {
+      _client: {
+        post(options: {
+          url: string;
+          query?: { directory?: string };
+          throwOnError?: boolean;
+        }): Promise<unknown>;
+      };
+    };
+    await raw._client.post({
+      url: `/question/${requestID}/reject`,
+      query: { directory },
+      throwOnError: true,
+    });
+  }
+
   getDirectory(): string {
     return config.opencode.data_dir;
   }

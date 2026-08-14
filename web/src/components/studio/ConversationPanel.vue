@@ -16,12 +16,66 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['send', 'stop', 'reply-permission', 'reply-question', 'revert-message'])
+const emit = defineEmits(['send', 'stop', 'reply-permission', 'reply-question', 'reject-question', 'revert-message'])
 
 const input = ref('')
 const sending = ref(false)
 const scrollEl = ref(null)
 const messageEl = ref(null)
+
+// ---- question 回答状态（按 `${questionId}:${questionIndex}` 记录） ----
+const selections = ref({}) // -> Set<string>（已选选项 label）
+const customAnswers = ref({}) // -> string（自定义输入）
+
+function optKey(questionId, qi) {
+  return `${questionId}:${qi}`
+}
+
+function isSelected(questionId, qi, label) {
+  return selections.value[optKey(questionId, qi)]?.has(label) ?? false
+}
+
+function toggleOption(questionId, qi, item, label) {
+  const key = optKey(questionId, qi)
+  const next = new Set(selections.value[key] ?? [])
+  if (item.multiple) {
+    if (next.has(label)) next.delete(label)
+    else next.add(label)
+  } else {
+    // 单选：再次点击已选项取消；否则替换为当前项
+    if (next.has(label) && next.size === 1) next.delete(label)
+    else {
+      next.clear()
+      next.add(label)
+    }
+  }
+  selections.value[key] = next
+}
+
+/** 每题必须已有回答（选了选项或填了自定义），才能提交 */
+function canSubmit(question) {
+  return question.questions.every((item, qi) => {
+    const key = optKey(question.id, qi)
+    if ((customAnswers.value[key] ?? '').trim().length > 0) return true
+    if (!item.options?.length) return false
+    return (selections.value[key]?.size ?? 0) > 0
+  })
+}
+
+/** 收集每题回答（自定义输入优先，否则为选中的选项 label 列表）并提交 */
+function submit(question) {
+  const answers = question.questions.map((item, qi) => {
+    const key = optKey(question.id, qi)
+    const custom = (customAnswers.value[key] ?? '').trim()
+    if (custom) return [custom]
+    return Array.from(selections.value[key] ?? [])
+  })
+  emit('reply-question', question, answers)
+}
+
+function reject(question) {
+  emit('reject-question', question)
+}
 
 const can_send = computed(() => input.value.trim().length > 0 && !sending.value && !props.busy)
 const placeholder = computed(() =>
@@ -60,10 +114,6 @@ async function send() {
   sending.value = false
 }
 
-function replyQuestion(question, answer) {
-  emit('reply-question', question, answer)
-}
-
 function onKeydown(e) {
   if (e.isComposing) return
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -84,16 +134,39 @@ function onKeydown(e) {
           @reply="(response) => emit('reply-permission', permission, response)"
         />
       </div>
-      <!-- 待处理问题 -->
+      <!-- 待处理问题（question 工具：选择选项或输入自定义答案后提交，模型才会继续） -->
       <div v-for="question in pendingQuestions" :key="question.id" class="pending-item question-card">
         <div class="q-head">
           <Icon icon="lucide:help-circle" width="15" class="q-icon" />
           <span class="q-title">AI 需要你确认</span>
         </div>
-        <p class="q-prompt">{{ question.prompt }}</p>
+        <div v-for="(item, qi) in question.questions" :key="qi" class="q-item">
+          <p class="q-prompt">{{ item.question }}</p>
+          <div v-if="item.options?.length" class="q-options">
+            <button
+              v-for="opt in item.options"
+              :key="opt.label"
+              type="button"
+              class="q-option-btn"
+              :class="{ selected: isSelected(question.id, qi, opt.label) }"
+              @click="toggleOption(question.id, qi, item, opt.label)"
+            >
+              <span class="q-option-label">{{ opt.label }}</span>
+              <span v-if="opt.description" class="q-option-desc">{{ opt.description }}</span>
+            </button>
+          </div>
+          <input
+            v-if="item.custom"
+            v-model="customAnswers[`${question.id}:${qi}`]"
+            class="q-custom"
+            type="text"
+            placeholder="输入自定义答案…"
+          />
+        </div>
         <div class="q-actions">
-          <Button v-for="choice in question.choices" :key="choice" size="sm" variant="secondary" @click="replyQuestion(question, choice)">
-            {{ choice }}
+          <Button size="sm" variant="secondary" @click="reject(question)">忽略</Button>
+          <Button size="sm" variant="primary" :disabled="!canSubmit(question)" @click="submit(question)">
+            提交回答
           </Button>
         </div>
       </div>
@@ -217,10 +290,77 @@ function onKeydown(e) {
   word-break: break-word;
 }
 
+.q-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.q-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.q-option-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition), background-color var(--transition), box-shadow var(--transition);
+}
+
+.q-option-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.q-option-btn.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.q-option-label {
+  font-weight: 500;
+}
+
+.q-option-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.q-custom {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.q-custom:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12);
+}
+
 .q-actions {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* ---------- 输入区 ---------- */

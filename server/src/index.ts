@@ -537,22 +537,38 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
-  // ---- 问题回复（通过发送回复消息应答） ----
+  // ---- 问题回复（question 工具回答走 OpenCode 原生 reply 端点，不是普通文本消息） ----
+  const qRejectMatch = path.match(/^\/api\/studio\/drafts\/([^/]+)\/questions\/([^/]+)\/reject$/);
+  if (qRejectMatch && req.method === 'POST') {
+    const [, draftId, questionId] = qRejectMatch;
+    readDraft(draftId!);
+    try {
+      await opencode.questionReject(questionId!, draftWorkspace(draftId!));
+      return json({ ok: true });
+    } catch (e) {
+      return errorJson(`忽略问题失败：${(e as Error).message}`, 1, 400);
+    }
+  }
+
   const qMatch = path.match(/^\/api\/studio\/drafts\/([^/]+)\/questions\/([^/]+)$/);
   if (qMatch && req.method === 'POST') {
-    const [, draftId] = qMatch;
+    const [, draftId, questionId] = qMatch;
     const draft = readDraft(draftId!);
-    const body = (await req.json()) as { answer?: string };
-    if (!body.answer) return errorJson('answer 不能为空');
+    const body = (await req.json()) as { answers?: string[][] };
+    if (!Array.isArray(body.answers) || body.answers.length === 0) {
+      return errorJson('answers 不能为空（每个问题一个数组，元素为选项 label）');
+    }
     try {
-      await opencode.getClient().session.prompt({
-        path: { id: draft.session_id! },
-        body: { parts: [{ type: 'text', text: body.answer }], noReply: true },
-        query: { directory: draftWorkspace(draftId!) },
+      await opencode.questionReply(questionId!, body.answers, draftWorkspace(draftId!));
+      logger.info('draft', '回答 AI 提问', {
+        draft_id: draftId,
+        extension_id: draft.extension_id,
+        question_id: questionId,
+        answers: body.answers.map((a) => (a ?? []).join(' / ')),
       });
       return json({ ok: true });
     } catch (e) {
-      return errorJson(`回复失败：${(e as Error).message}`, 1, 400);
+      return errorJson(`回答失败：${(e as Error).message}`, 1, 400);
     }
   }
 

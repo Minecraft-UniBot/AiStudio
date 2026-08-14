@@ -183,9 +183,18 @@ async function replyPermission(permission, response) {
   }
 }
 
-async function replyQuestion(question, answer) {
+async function replyQuestion(question, answers) {
   try {
-    await store.replyQuestion(draftId, question.id, answer)
+    await store.replyQuestion(draftId, question.id, answers)
+    store.removePendingQuestion(question.id)
+  } catch (e) {
+    toast_error(e.message)
+  }
+}
+
+async function rejectQuestion(question) {
+  try {
+    await store.rejectQuestion(draftId, question.id)
     store.removePendingQuestion(question.id)
   } catch (e) {
     toast_error(e.message)
@@ -353,6 +362,7 @@ onMounted(async () => {
         @stop="stop"
         @reply-permission="replyPermission"
         @reply-question="replyQuestion"
+        @reject-question="rejectQuestion"
         @revert-message="requestRevert"
       />
 

@@ -139,6 +139,8 @@ export type StudioEvent =
   | { type: 'permission.asked'; draft_id: string; permission: PermissionRequest }
   | { type: 'permission.replied'; draft_id: string; permission_id: string }
   | { type: 'question.asked'; draft_id: string; question: QuestionRequest }
+  | { type: 'question.replied'; draft_id: string; question_id: string }
+  | { type: 'question.rejected'; draft_id: string; question_id: string }
   | { type: 'draft.updated'; draft_id: string; status: DraftStatus }
   | { type: 'validation.updated'; draft_id: string; run: ValidationRun }
   | { type: 'review.updated'; draft_id: string; review: ReviewResult }
@@ -154,13 +156,33 @@ export interface PermissionRequest {
   metadata: Record<string, unknown>;
 }
 
-/** OpenCode question 请求（归一化后） */
+/** OpenCode question 选项（对应 QuestionV1.Option：{ label, description }） */
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+/** OpenCode question 单条提问（对应 QuestionV1.Info） */
+export interface QuestionItem {
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  multiple: boolean;
+  /** 是否允许输入自定义答案（默认 true） */
+  custom: boolean;
+}
+
+/**
+ * OpenCode question 请求（对应 QuestionV1.Request，事件 question.asked 的 properties）。
+ * 一次请求可包含多条提问；回答必须经 `POST /question/:id/reply` 以
+ * `{ answers: string[][] }` 回传（每个问题一个数组），模型才会继续执行。
+ */
 export interface QuestionRequest {
   id: string;
   session_id: string;
-  prompt: string;
-  choices: string[];
-  multiple: boolean;
+  questions: QuestionItem[];
+  /** question 工具调用位置（工具恢复后用于刷新对应 part） */
+  tool?: { messageID: string; callID: string };
 }
 
 /** 发布记录 */

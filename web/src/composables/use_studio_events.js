@@ -47,6 +47,10 @@ export function use_studio_events() {
         case 'question.asked':
           store.pushPendingQuestion(event.question)
           break
+        case 'question.replied':
+        case 'question.rejected':
+          store.removePendingQuestion(event.question_id)
+          break
         default:
           break
       }
