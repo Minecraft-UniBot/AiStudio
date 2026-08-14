@@ -18,11 +18,9 @@ const emit = defineEmits(['open', 'remove', 'create', 'refresh-status'])
 
 function statusVariant(status) {
   switch (status) {
-    case 'generating':
+    case 'planning':
+    case 'coding':
       return 'accent'
-    case 'checking':
-    case 'repairing':
-      return 'warning'
     case 'reviewing':
     case 'debugging':
       return 'accent'

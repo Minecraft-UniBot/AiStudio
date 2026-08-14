@@ -93,12 +93,6 @@ watch(
   () => scrollToBottom(),
 )
 
-// 新权限/问题出现时滚到底部
-watch(
-  () => [props.pendingPermissions.length, props.pendingQuestions.length],
-  () => scrollToBottom(),
-)
-
 onMounted(scrollToBottom)
 onUnmounted(() => {})
 
@@ -139,51 +133,65 @@ function onKeydown(e) {
         :message="msg"
         @revert="(messageId) => emit('revert-message', messageId)"
       />
-      <!-- 待处理权限（贴近输入框，AI 卡在权限时置顶关注） -->
-      <div v-for="permission in pendingPermissions" :key="permission.id" class="pending-item">
-        <PermissionRequest
-          :draft-id="draftId"
-          :permission="permission"
-          @reply="(response) => emit('reply-permission', permission, response)"
-        />
+      <div ref="messageEl" />
+    </div>
+
+    <!-- 待处理授权 / 提问：固定在输入框上方，AI 卡住时无需滚动即可处理 -->
+    <div v-if="pendingPermissions.length || pendingQuestions.length" class="pending-bar">
+      <div class="pending-bar-head">
+        <span class="pending-bar-dot" />
+        <span>需要你处理</span>
       </div>
-      <!-- 待处理问题（question 工具：选择选项或输入自定义答案后提交，模型才会继续） -->
-      <div v-for="question in pendingQuestions" :key="question.id" class="pending-item question-card">
-        <div class="q-head">
-          <Icon icon="lucide:help-circle" width="15" class="q-icon" />
-          <span class="q-title">AI 需要你确认</span>
-        </div>
-        <div v-for="(item, qi) in question.questions" :key="qi" class="q-item">
-          <p class="q-prompt">{{ item.question }}</p>
-          <div v-if="item.options?.length" class="q-options">
-            <button
-              v-for="opt in item.options"
-              :key="opt.label"
-              type="button"
-              class="q-option-btn"
-              :class="{ selected: isSelected(question.id, qi, opt.label) }"
-              @click="toggleOption(question.id, qi, item, opt.label)"
-            >
-              <span class="q-option-label">{{ opt.label }}</span>
-              <span v-if="opt.description" class="q-option-desc">{{ opt.description }}</span>
-            </button>
-          </div>
-          <input
-            v-if="item.custom"
-            v-model="customAnswers[`${question.id}:${qi}`]"
-            class="q-custom"
-            type="text"
-            placeholder="输入自定义答案…"
+      <div class="pending-list">
+        <div v-for="permission in pendingPermissions" :key="permission.id" class="pending-item">
+          <PermissionRequest
+            :draft-id="draftId"
+            :permission="permission"
+            @reply="(response) => emit('reply-permission', permission, response)"
           />
         </div>
-        <div class="q-actions">
-          <Button size="sm" variant="secondary" @click="reject(question)">忽略</Button>
-          <Button size="sm" variant="primary" :disabled="!canSubmit(question)" @click="submit(question)">
-            提交回答
-          </Button>
+        <!-- 待处理问题（question 工具：选择选项或输入自定义答案后提交，模型才会继续） -->
+        <div v-for="question in pendingQuestions" :key="question.id" class="pending-item question-card">
+          <div class="q-head">
+            <div class="q-icon-wrap">
+              <Icon icon="lucide:help-circle" width="15" class="q-icon" />
+            </div>
+            <span class="q-title">AI 需要你确认</span>
+          </div>
+          <div v-for="(item, qi) in question.questions" :key="qi" class="q-item">
+            <p class="q-prompt">{{ item.question }}</p>
+            <div v-if="item.options?.length" class="q-options">
+              <button
+                v-for="opt in item.options"
+                :key="opt.label"
+                type="button"
+                class="q-option-btn"
+                :class="{ selected: isSelected(question.id, qi, opt.label) }"
+                @click="toggleOption(question.id, qi, item, opt.label)"
+              >
+                <span class="q-radio" />
+                <span class="q-option-text">
+                  <span class="q-option-label">{{ opt.label }}</span>
+                  <span v-if="opt.description" class="q-option-desc">{{ opt.description }}</span>
+                </span>
+              </button>
+            </div>
+            <input
+              v-if="item.custom"
+              v-model="customAnswers[`${question.id}:${qi}`]"
+              class="q-custom"
+              type="text"
+              placeholder="输入自定义答案…"
+            />
+          </div>
+          <div class="q-actions">
+            <Button size="sm" variant="secondary" @click="reject(question)">忽略</Button>
+            <Button size="sm" variant="primary" :disabled="!canSubmit(question)" @click="submit(question)">
+              提交回答
+            </Button>
+          </div>
         </div>
       </div>
-      <div ref="messageEl" />
     </div>
 
     <!-- 输入区：生成中切换为停止按钮（Plan 3.2） -->

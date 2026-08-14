@@ -1,11 +1,10 @@
-// 草稿状态机：主链 draft -> generating -> checking -> reviewing -> ready -> published
+// 草稿状态机：三阶段主链 draft -> planning -> coding -> reviewing -> ready -> published
 export const STATUS_LABELS = {
   draft: '草稿',
-  generating: '生成中',
-  checking: '校验中',
-  repairing: '修复中',
-  reviewing: '审核中',
-  debugging: '调试中',
+  planning: '规划中',
+  coding: '编码中',
+  reviewing: '审查中',
+  debugging: '修复中',
   ready: '可发布',
   published: '已发布',
   failed: '失败',
@@ -14,9 +13,8 @@ export const STATUS_LABELS = {
 
 export const STATUS_COLORS = {
   draft: 'gray',
-  generating: 'blue',
-  checking: 'amber',
-  repairing: 'amber',
+  planning: 'blue',
+  coding: 'blue',
   reviewing: 'purple',
   debugging: 'purple',
   ready: 'green',

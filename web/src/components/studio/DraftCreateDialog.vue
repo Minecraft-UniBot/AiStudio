@@ -79,8 +79,8 @@ function toggleType(type) {
   <Dialog
     v-model="open"
     title="新建扩展草稿"
-    description="一句话描述你想要的扩展功能，AI 会在隔离工作区中自动生成"
-    confirm-text="创建并开始生成"
+    description="AI 会先向你确认需求细节并规划，再自动编写代码，最后独立审查。全程在隔离工作区中进行"
+    confirm-text="创建并开始规划"
     :loading="creating"
     width="min(520px, calc(100vw - 32px))"
     @confirm="create"

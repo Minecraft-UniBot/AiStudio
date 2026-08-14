@@ -91,21 +91,18 @@ export function publishDraft(draftId: string): PublishRecord {
 function doPublish(draftId: string, extensionId: string): PublishRecord {
   const draft = readDraft(draftId);
 
-  // 1. 摘要核对：文件必须与最近通过校验的状态完全一致
+  // 1. 摘要核对：文件必须与最近审查通过时的状态完全一致（Plan 3.4：审查通过才允许发布）
   const current = computeRevision(draftId);
-  if (draft.validation_revision !== current || !draft.validation_revision) {
+  if (draft.review_revision !== current || !draft.review_revision) {
     logger.warn('publish', '发布被拒绝：文件摘要已过期', {
       draft_id: draftId,
       extension_id: extensionId,
     });
-    throw new PublishError('草稿文件自校验后发生变更，请重新校验后再发布', 'STALE_REVISION');
+    throw new PublishError('草稿文件自审查后发生变更，请重新审查后再发布', 'STALE_REVISION');
   }
-  // 校验必须通过且无未解决的必须修复问题
-  if (!draft.validation || draft.validation.status !== 'passed') {
-    throw new PublishError('校验未通过，无法发布', 'VALIDATION_FAILED');
-  }
-  if (draft.review && draft.review.status !== 'passed') {
-    throw new PublishError('AI 审核存在未解决的重要问题，无法发布', 'REVIEW_FAILED');
+  // 审查必须通过且无未解决的必须修复问题
+  if (!draft.review || draft.review.status !== 'passed') {
+    throw new PublishError('审查未通过，无法发布', 'REVIEW_FAILED');
   }
 
   // 2. 目标目录必须不存在（第一版拒绝覆盖）

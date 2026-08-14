@@ -16,10 +16,10 @@ import { opencode } from './opencode';
 import { readDraft, updateDraft, draftWorkspace } from './drafts';
 import { settleDebugging } from './debugging';
 import { settleReview, startReview } from './review';
-import { runValidation } from './validation';
+import { startCoding } from './pipeline';
 import { draftIdForSession, getWorkspaces } from './sessions';
 import { logger } from './logger';
-import { docsAllowlistPaths } from './config';
+import { docsAllowlistPaths, marketAllowlistPaths } from './config';
 import type { PermissionRequest, QuestionRequest, StudioEvent } from './types';
 
 const WS_CLIENTS = new Set<ServerWebSocket<unknown>>();
@@ -66,15 +66,23 @@ function normalizePath(value: string): string {
 }
 
 /**
- * 判断权限请求是否命中本地文档白名单（读工作区外文档触发的是 external_directory，
- * 工作区内 read 通常已被配置放行，因此两类权限名都认）。
- * 命中的文档读取由后端自动放行（once），不推送到前端弹窗；
+ * 判断权限请求是否命中自动放行规则：
+ * 1. web_fetch 访问 github.com（GitHub 公开仓库只读参考）→ 自动放行
+ * 2. 读工作区外文档触发的是 external_directory，工作区内 read 通常已被配置放行，
+ *    因此 read / external_directory 两类权限名都认，命中文档/市场白名单 → 自动放行
+ * 命中的请求由后端自动放行（once），不推送到前端弹窗；
  * 其它权限（edit / bash / 白名单外路径）保持原样询问。
  */
 function matchesDocsAllowlist(permission: PermissionRequest): boolean {
   const tool = (permission.tool_name || permission.permission || '').toLowerCase();
+  // GitHub 公开仓库只读放行（web_fetch github.com）
+  if (tool === 'web_fetch') {
+    const target =
+      permission.description || String(permission.metadata?.url ?? permission.metadata?.filepath ?? '');
+    return /github\.com/.test(target);
+  }
   if (tool !== 'read' && tool !== 'external_directory') return false;
-  const allowlist = docsAllowlistPaths();
+  const allowlist = [...docsAllowlistPaths(), ...marketAllowlistPaths()];
   const candidates: string[] = [];
   if (typeof permission.metadata?.filepath === 'string') {
     candidates.push(permission.metadata.filepath);
@@ -306,7 +314,11 @@ let consumerStarted = false;
  * 修复/调试会话完成后：结算进展 → 有进展则重新校验 → 校验通过后自动复核。
  * 无进展熔断由 settleDebugging 处理（连续两轮 → failed）。
  */
-async function settleAndRecheck(draftId: string, status: 'repairing' | 'debugging') {
+/**
+ * 修复（审查发现问题后）完成后：结算进展 → 有进展则重新审查。
+ * 无进展熔断由 settleDebugging 处理（连续两轮 → failed）。
+ */
+async function settleAndRecheck(draftId: string) {
   try {
     const outcome = await settleDebugging(draftId);
     const afterSettle = readDraft(draftId);
@@ -314,25 +326,19 @@ async function settleAndRecheck(draftId: string, status: 'repairing' | 'debuggin
       broadcast({ type: 'draft.updated', draft_id: draftId, status: 'failed' });
       return;
     }
-    if (!outcome.changed && status === 'debugging') {
-      // 调试无进展但未熔断：回到 checking 等待用户决定（前端展示原因）
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: afterSettle.status });
+    if (!outcome.changed) {
+      // 修复无进展但未熔断：回到 draft 等待用户决定（前端展示原因）
+      updateDraft(draftId, { status: 'draft' });
+      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
       return;
     }
-    // 有进展 → 重新校验 → 校验通过 → 自动复核
-    const run = await runValidation(draftId);
-    const post = readDraft(draftId);
-    if (run.status === 'passed') {
-      await startReview(draftId);
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'reviewing' });
-    } else {
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: post.status });
-    }
-    broadcast({ type: 'validation.updated', draft_id: draftId, run });
+    // 有进展 → 重新审查
+    await startReview(draftId);
+    broadcast({ type: 'draft.updated', draft_id: draftId, status: 'reviewing' });
   } catch (e) {
-    logger.error('events', `${status} 结算失败`, { draft_id: draftId, error: (e as Error).message });
+    logger.error('events', '修复结算失败', { draft_id: draftId, error: (e as Error).message });
     const current = readDraft(draftId);
-    if (current.status === 'checking' || current.status === 'debugging' || current.status === 'repairing') {
+    if (current.status === 'debugging') {
       updateDraft(draftId, { status: 'draft', error: (e as Error).message });
       broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
     }
@@ -363,36 +369,59 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
     return; // 草稿已删除
   }
 
-  // 主会话完成（生成 / 修复 / 调试）
+  // 主会话完成（规划 / 编码 / 修复）
   if (sessionId === draft.session_id) {
-    if (draft.status === 'generating') {
-      logger.info('draft', 'AI 生成完成', {
+    // 规划完成 → 自动进入编码阶段
+    if (draft.status === 'planning') {
+      logger.info('draft', '规划完成，自动进入编码阶段', {
         draft_id: draftId,
         extension_id: draft.extension_id,
         session_id: sessionId,
       });
-      updateDraft(draftId, { status: 'draft' });
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+      try {
+        await startCoding(draftId);
+        broadcast({ type: 'draft.updated', draft_id: draftId, status: 'coding' });
+      } catch (e) {
+        logger.error('draft', '进入编码阶段失败', { draft_id: draftId, error: (e as Error).message });
+        updateDraft(draftId, { status: 'draft', error: (e as Error).message });
+        broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+      }
       return;
     }
-    if (draft.status === 'repairing' || draft.status === 'debugging') {
-      logger.info('draft', `AI ${draft.status === 'repairing' ? '修复' : '调试'}完成，进入结算`, {
+    // 编码完成 → 自动进入审查
+    if (draft.status === 'coding') {
+      logger.info('draft', '编码完成，自动进入审查阶段', {
         draft_id: draftId,
         extension_id: draft.extension_id,
         session_id: sessionId,
-        status_before: draft.status,
       });
-      await settleAndRecheck(draftId, draft.status);
+      try {
+        await startReview(draftId);
+        broadcast({ type: 'draft.updated', draft_id: draftId, status: 'reviewing' });
+      } catch (e) {
+        logger.error('draft', '进入审查阶段失败', { draft_id: draftId, error: (e as Error).message });
+        updateDraft(draftId, { status: 'draft', error: (e as Error).message });
+        broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+      }
+      return;
+    }
+    if (draft.status === 'debugging') {
+      logger.info('draft', '修复完成，进入结算', {
+        draft_id: draftId,
+        extension_id: draft.extension_id,
+        session_id: sessionId,
+      });
+      await settleAndRecheck(draftId);
     }
     return;
   }
 
-  // 审核会话完成 → 结算审核结果
+  // 审查会话完成 → 结算审查结果
   if (sessionId === draft.review_session_id) {
     try {
       const result = await settleReview(draftId);
       const after = readDraft(draftId);
-      logger.info('review', `审核完成`, {
+      logger.info('review', `审查完成`, {
         draft_id: draftId,
         extension_id: draft.extension_id,
         status: result.status,
@@ -402,7 +431,7 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
       broadcast({ type: 'review.updated', draft_id: draftId, review: result });
       broadcast({ type: 'draft.updated', draft_id: draftId, status: after.status });
     } catch (e) {
-      logger.error('review', `审核结算失败`, { draft_id: draftId, error: (e as Error).message });
+      logger.error('review', `审查结算失败`, { draft_id: draftId, error: (e as Error).message });
     }
   }
 }

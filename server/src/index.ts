@@ -6,7 +6,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { ensureDataDirs, saveConfig, docsAllowlist } from './config';
+import { ensureDataDirs, saveConfig, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
 import { config } from './config';
 import { opencode } from './opencode';
 import { logger } from './logger';
@@ -27,18 +27,13 @@ import {
   sanitizeTypes,
   updateDraft,
 } from './drafts';
-import {
-  isValidationRunning,
-  runValidation,
-  updateValidationSteps,
-  validationStepsConfig,
-} from './validation';
-import { maybeReviewAfterValidation, settleReview, startReview } from './review';
+import { startReview } from './review';
 import { startDebugging } from './debugging';
 import { publishDraft, PublishError } from './publishing';
 import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './events';
 import { getTools, updateTools } from './tools';
 import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './prompts';
+import { buildSecurity } from './pipeline';
 import { assertFeatureEnabled } from './registry';
 import type { DraftMeta } from './types';
 
@@ -92,20 +87,7 @@ function errorJson(message: string, code = 1, status = 400): Response {
 
 // ===== 工具注册表（tools.ts 持久化实现，见 Plan.md 7.2） =====
 
-/** 把校验失败步骤转成 must_fix 问题单（供自动修复入口使用，Plan 3.4） */
-function failedValidationIssues(draft: DraftMeta) {
-  const steps = draft.validation?.steps ?? [];
-  return steps
-    .filter((s) => s.status === 'failed')
-    .map((s, idx) => ({
-      id: `val-issue-${idx + 1}`,
-      severity: 'must_fix' as const,
-      title: `${s.name} 未通过`,
-      detail: s.detail ?? s.message ?? '校验步骤失败，请查看技术详情',
-      file: undefined,
-      suggestion: '根据技术详情修复后重新校验',
-    }));
-}
+/** 统一安全约束与编码阶段编排（见 pipeline.ts） */
 
 function draftFileList(draftId: string) {
   const draft = readDraft(draftId);
@@ -202,13 +184,13 @@ async function handleRequest(req: Request): Promise<Response> {
       if (!body.extension_id || !body.name || !body.description) {
         return errorJson('缺少必填字段（extension_id / name / description）');
       }
-      // 全局并发限制（Plan 8.2）：同一管理员同时最多一个生成/修复任务
+      // 全局并发限制（Plan 8.2）：同一管理员同时最多一个规划/编码/修复任务
       const active = listDrafts().filter((d) =>
-        ['generating', 'repairing', 'debugging'].includes(d.status),
+        ['planning', 'coding', 'debugging'].includes(d.status),
       );
       if (active.length > 0) {
         return errorJson(
-          `已有草稿「${active[0]!.name}」正在生成/修复中，请先等待其完成`,
+          `已有草稿「${active[0]!.name}」正在规划/编码/修复中，请先等待其完成`,
           1,
           409,
         );
@@ -225,7 +207,7 @@ async function handleRequest(req: Request): Promise<Response> {
         agent: body.agent ?? config.defaults.agent,
       });
 
-      // 创建 OpenCode session 并发送第一条实现请求
+      // 创建 OpenCode session 并进入「规划」阶段
       const client = opencode.getClient();
       const workspace = draftWorkspace(draft.id);
       // 旧版草稿可能没有 git 仓库：补齐后再建会话（回退功能依赖，见 ensureGitWorkspace）
@@ -240,8 +222,8 @@ async function handleRequest(req: Request): Promise<Response> {
         return errorJson('创建 OpenCode 会话失败');
       }
       trackSession(draft.id, sessionId);
-      updateDraft(draft.id, { session_id: sessionId, status: 'generating' });
-      logger.info('draft', '创建草稿并启动生成', {
+      updateDraft(draft.id, { session_id: sessionId, status: 'planning' });
+      logger.info('draft', '创建草稿并进入规划阶段', {
         draft_id: draft.id,
         extension_id: draft.extension_id,
         session_id: sessionId,
@@ -249,33 +231,27 @@ async function handleRequest(req: Request): Promise<Response> {
         model: draft.model?.model_id ?? 'auto',
       });
 
-      // 提示词模板化（Plan 7.1）：scaffold + system 均从 prompts/*.md 渲染，
-      // 安全约束由后端追加（路径白名单、密钥禁止读取、本地文档白名单、联网禁令），不进入可编辑模板
-      const docs = docsAllowlist();
-      const security = [
-        `1. 只能操作草稿工作区：${workspace}（目录之外的一切内容禁止读取或修改）。`,
-        `2. 本地文档只读白名单（仅可读取，禁止修改）：\n${docs}`,
-        '3. 禁止读取 .env、凭据、密钥类文件及 UniBot 核心代码、配置、用户数据。',
-        '4. 禁止使用 web_fetch / web_search 联网搜索本项目（UniBot、扩展开发等）内容；' +
-          '仅当本地文档确无答案时允许查询第三方库（nonebot2 / alconna / pydantic 等）官方文档，且需先说明目的并等待用户确认。',
-        '5. 涉及 shell 命令和网络访问时，先说明目的并等待用户确认。',
-        '6. 扩展目录名与 Extension.toml 的 extension.id 必须完全一致（含大小写）。',
-      ].join('\n');
+      // 提示词模板化（Plan 7.1）：planning + system 均从 prompts/*.md 渲染，
+      // 安全约束由后端追加（路径白名单、文档/市场白名单、联网规则），不进入可编辑模板
+      const security = buildSecurity(workspace);
       const system = renderPromptWithSecurity('system', {
         allowlist: workspace,
+        market_path: marketRegistryPath(),
       }, security);
-      const scaffoldPrompt = renderPromptWithSecurity('scaffold', {
+      const planningPrompt = renderPromptWithSecurity('planning', {
         name: draft.name,
         extension_id: draft.extension_id,
         types: draft.types.join('、'),
         user_request: draft.description,
         allowlist: workspace,
+        market_path: marketRegistryPath(),
+        docs_path: docsAllowlist(),
       }, security);
 
       await client.session.promptAsync({
         path: { id: sessionId },
         body: {
-          parts: [{ type: 'text', text: scaffoldPrompt }],
+          parts: [{ type: 'text', text: planningPrompt }],
           agent: draft.agent,
           system,
         },
@@ -348,7 +324,7 @@ async function handleRequest(req: Request): Promise<Response> {
             // 新消息会触发 opencode 的 revert cleanup（物理删除被回退的消息），
             // 因此清除暂存过滤标记，避免把新消息也过滤掉。
             updateDraft(draftId, {
-              status: 'generating',
+              status: 'draft',
               ...(draft.revert_message_id ? { revert_message_id: null } : {}),
             });
             logger.info('draft', '发送新消息', {
@@ -373,8 +349,8 @@ async function handleRequest(req: Request): Promise<Response> {
           // 回退到某条用户消息之前：OpenCode 原生 revert（恢复文件状态 + 对话记录），
           // 之后旧校验/审核结果一律失效，草稿回到 draft 状态等待重新生成。
           if (req.method === 'POST' && draft.session_id) {
-            if (['generating', 'repairing', 'debugging', 'checking', 'reviewing'].includes(draft.status)) {
-              return errorJson('当前正在生成/校验/审核中，请先停止或等待完成后再回退', 1, 409);
+            if (['planning', 'coding', 'debugging', 'reviewing'].includes(draft.status)) {
+              return errorJson('当前正在规划/编码/审查中，请先停止或等待完成后再回退', 1, 409);
             }
             const body = (await req.json()) as { message_id?: string };
             if (!body.message_id) return errorJson('缺少 message_id');
@@ -392,12 +368,14 @@ async function handleRequest(req: Request): Promise<Response> {
             if (!staged || staged.messageID !== body.message_id) {
               return errorJson('回退未生效：目标消息不存在或会话状态异常，请刷新后重试', 1, 400);
             }
-            // 文件已恢复、对话待物理清理：重置校验/审核/摘要并记录回退点，锁定一键发布
+            // 文件已恢复、对话待物理清理：重置规划/审查/摘要并记录回退点，锁定一键发布
             updateDraft(draftId, {
               status: 'draft',
               validation: null,
               validation_revision: null,
               review: null,
+              review_revision: null,
+              plan_summary: null,
               revert_message_id: body.message_id,
               error: undefined,
             });
@@ -432,13 +410,9 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'validate': {
           if (req.method === 'POST') {
-            if (isValidationRunning(draftId)) return errorJson('校验已在进行中');
-            const run = await runValidation(draftId);
-            // 校验通过后自动复核（Plan 3.5）
-            if (run.status === 'passed') {
-              await maybeReviewAfterValidation(draftId);
-            }
-            return json(run);
+            // 三阶段流程不再有独立校验：此端点改为触发「审查」（兼容旧前端调用）
+            const review = await startReview(draftId);
+            return json(review);
           }
           break;
         }
@@ -455,18 +429,11 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'debug': {
           if (req.method === 'POST') {
-            // 共用修复入口（Plan 3.4/3.5）：
-            // - 审核存在 must_fix 问题 → 按审核问题自动调试（debugging）
-            // - 校验失败 → 按失败步骤摘要自动修复（repairing）
+            // 审查发现问题后的自动修复
             const current = readDraft(draftId);
             const reviewMustFix = current.review?.issues?.filter((i) => i.severity === 'must_fix');
             if (reviewMustFix?.length) {
               const review = await startDebugging(draftId);
-              return json(review);
-            }
-            if (current.validation?.status === 'failed') {
-              const issues = failedValidationIssues(current);
-              const review = await startDebugging(draftId, issues, 'validation');
               return json(review);
             }
             return errorJson('没有需要修复的问题', 1, 400);
@@ -651,15 +618,6 @@ async function handleRequest(req: Request): Promise<Response> {
     if (!body.content) return errorJson('content 不能为空');
     const created = savePrompt(name, body.content);
     return json({ name, ...created });
-  }
-
-  // ---- 校验步骤配置（可编排：启停 + 排序，Plan 8.3） ----
-  if (path === '/api/studio/validation/steps') {
-    if (req.method === 'GET') return json(validationStepsConfig());
-    if (req.method === 'PATCH') {
-      const body = (await req.json()) as unknown[];
-      return json(updateValidationSteps(body as never));
-    }
   }
 
   return errorJson('接口不存在', 404, 404);

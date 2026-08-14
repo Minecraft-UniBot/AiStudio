@@ -34,7 +34,6 @@ const selectedFile = ref('')
 const fileContent = ref('')
 const fileLoading = ref(false)
 const fileViewerOpen = ref(false)
-const validating = ref(false)
 const reviewing = ref(false)
 const repairing = ref(false)
 const publishing = ref(false)
@@ -43,48 +42,40 @@ const publishOpen = ref(false)
 const reverting = ref(false)
 const revertTarget = ref('')
 const revertOpen = ref(false)
-/** 本地摘要过期标记：发送消息后置 true，校验通过后清除（Plan 12.2） */
+/** 本地摘要过期标记：发送消息后置 true，审查通过后清除 */
 const revisionDirty = ref(false)
 
 const draft = computed(() => store.currentDraft)
 const busy = computed(() =>
-  ['generating', 'repairing', 'debugging'].includes(draft.value?.status),
+  ['planning', 'coding', 'debugging'].includes(draft.value?.status),
 )
 const reviewPassed = computed(() => draft.value?.review?.status === 'passed')
 const canPublish = computed(
   () =>
     draft.value?.status === 'ready' &&
     !revisionDirty.value &&
-    !validating.value &&
     !reviewing.value &&
     reviewPassed.value,
 )
 
-// ===== 主操作按钮状态机（Plan 3.4） =====
+// ===== 主操作按钮状态机（三阶段：规划 → 编码 → 审查） =====
 const primaryAction = computed(() => {
   const status = draft.value?.status
-  // 生成 / 修复 / 调试中 → 停止
-  if (['generating', 'repairing', 'debugging'].includes(status)) {
+  // 规划 / 编码 / 修复中 → 停止
+  if (['planning', 'coding', 'debugging'].includes(status)) {
     return { label: '停止生成', icon: 'lucide:square', variant: 'danger', handler: stop }
   }
-  // 需要用户补充信息（Plan 3.4：显示易懂的问题）
+  // 需要用户补充信息（规划阶段提问）
   if (store.pendingQuestions.length > 0) {
     return { label: '需要你确认', icon: 'lucide:help-circle', variant: 'secondary', disabled: true }
   }
-  // 检查中（Plan 3.4：显示当前检查项目）
-  if (status === 'checking') {
-    if (draft.value?.validation?.status === 'failed') {
-      return { label: '自动修复', icon: 'lucide:wrench', variant: 'warning', handler: autoFix }
-    }
-    return { label: '检查中…', icon: 'lucide:loader-2', variant: 'secondary', disabled: true, loading: true }
-  }
-  // 审核中：有 must_fix → 自动修复；否则审核进行中
+  // 审查中：有 must_fix → 自动修复；否则审查进行中
   if (status === 'reviewing') {
     const mustFix = draft.value?.review?.issues?.some((issue) => issue.severity === 'must_fix')
     if (mustFix) {
       return { label: '自动修复', icon: 'lucide:wrench', variant: 'warning', handler: autoFix }
     }
-    return { label: '审核中…', icon: 'lucide:brain', variant: 'secondary', disabled: true, loading: true }
+    return { label: '审查中…', icon: 'lucide:brain', variant: 'secondary', disabled: true, loading: true }
   }
   // 可发布
   if (status === 'ready') {
@@ -154,9 +145,9 @@ async function refreshAll() {
 
 watch(
   // store.currentDraft 已被 Pinia 自动解包为草稿对象，不能访问 .value
-  () => store.currentDraft?.validation_revision,
+  () => store.currentDraft?.review_revision,
   (revision) => {
-    // 后端摘要变化（校验通过）时清除本地过期标记
+    // 后端摘要变化（审查通过）时清除本地过期标记
     if (revision) revisionDirty.value = false
   },
 )
@@ -165,7 +156,7 @@ watch(
 async function send(text) {
   try {
     await store.sendPrompt(draftId, text)
-    // 发送后文件可能变更，锁定发布直到重新校验（Plan 12.2）
+    // 发送后文件可能变更，锁定发布直到重新审查
     revisionDirty.value = true
   } catch (e) {
     toast_error(e.message)
@@ -203,19 +194,7 @@ async function rejectQuestion(question) {
   }
 }
 
-// ===== 校验 / 审核 / 修复 =====
-async function validate() {
-  validating.value = true
-  try {
-    await store.runValidation(draftId)
-    await store.fetchDraft(draftId)
-  } catch (e) {
-    toast_error(e.message)
-  } finally {
-    validating.value = false
-  }
-}
-
+// ===== 审查 / 修复 =====
 async function review() {
   reviewing.value = true
   try {
@@ -317,7 +296,7 @@ onMounted(async () => {
       <button
         v-for="tab in [
           { id: 'result', label: '对话' },
-          { id: 'check', label: '检查' },
+          { id: 'check', label: '审查' },
           { id: 'settings', label: '结果与设置' },
         ]"
         :key="tab.id"
@@ -343,7 +322,7 @@ onMounted(async () => {
           :draft="draft"
           :file-tree="fileTree"
           :selected-file="selectedFile"
-          :empty-text="store.messages.length ? '生成中…' : '加载中…'"
+          :empty-text="store.messages.length ? '工作中…' : '加载中…'"
           @select-file="openFile"
           @collapse="leftCollapsed = true"
         />
@@ -382,8 +361,8 @@ onMounted(async () => {
             <div class="tabs">
               <button class="tab" :class="{ active: activeTab === 'result' }" @click="activeTab = 'result'">功能</button>
               <button class="tab" :class="{ active: activeTab === 'check' }" @click="activeTab = 'check'">
-                检查
-                <span v-if="draft.validation" class="tab-dot" :class="draft.validation.status" />
+                审查
+                <span v-if="draft.review" class="tab-dot" :class="draft.review.status" />
               </button>
               <button class="tab" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">设置</button>
             </div>
@@ -403,14 +382,12 @@ onMounted(async () => {
               />
             </div>
 
-            <!-- 检查 -->
+            <!-- 审查 -->
             <div v-else-if="activeTab === 'check'" class="right-scroll">
               <ValidationPanel
                 :draft="draft"
-                :validating="validating"
                 :reviewing="reviewing"
                 :repairing="repairing"
-                @validate="validate"
                 @review="review"
                 @debug="autoFix"
               />
@@ -460,7 +437,7 @@ onMounted(async () => {
     <Dialog
       v-model="revertOpen"
       title="回退到该消息之前？"
-      description="将撤销这条消息及其后的所有改动，恢复文件状态和对话记录；旧校验与审核结果会失效，需要重新生成与检查。"
+      description="将撤销这条消息及其后的所有改动，恢复文件状态和对话记录；旧规划与审查结果会失效，需要重新开始。"
       confirm-text="确认回退"
       confirm-variant="danger"
       :loading="reverting"

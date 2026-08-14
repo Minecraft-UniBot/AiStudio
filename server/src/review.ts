@@ -5,9 +5,9 @@
  * - 审核会话空闲后结算：无 must_fix → ready；有 must_fix → 交由调试阶段修复
  * - 调试完成后由事件层重新校验并复核（见 events.ts）
  */
-import { readDraft, updateDraft, draftWorkspace } from './drafts';
+import { readDraft, updateDraft, draftWorkspace, computeRevision } from './drafts';
 import { opencode } from './opencode';
-import { config, docsAllowlist } from './config';
+import { config, docsAllowlist, marketAllowlist } from './config';
 import { trackSession } from './sessions';
 import { logger } from './logger';
 import { renderPromptWithSecurity } from './prompts';
@@ -69,28 +69,29 @@ export async function startReview(draftId: string): Promise<ReviewResult> {
     round: (draft.review?.round ?? 0) + 1,
   });
 
-  // 收集需求、校验结果与调试轮次作为审核上下文
+  // 收集需求、规划与调试轮次作为审查上下文
   const context = [
-    `# 草稿 ${draft.extension_id}（${draft.name}）审核任务`,
+    `# 草稿 ${draft.extension_id}（${draft.name}）审查任务`,
     `## 原始需求\n${draft.description}`,
     `## 扩展类型\n${draft.types.join(', ')}`,
-    draft.validation
-      ? `## 最近校验结果\n${JSON.stringify(draft.validation, null, 2)}`
-      : '## 校验结果\n（未执行）',
+    draft.plan_summary
+      ? `## 规划摘要\n${draft.plan_summary}`
+      : '## 规划摘要\n（无，直接按需求审查）',
     draft.review?.rounds?.length
-      ? `## 已进行的调试轮次\n${draft.review.rounds.length} 轮（最近摘要 ${draft.review.rounds[draft.review.rounds.length - 1]?.revision_after ?? '未结算'}）`
+      ? `## 已进行的修复轮次\n${draft.review.rounds.length} 轮（最近摘要 ${draft.review.rounds[draft.review.rounds.length - 1]?.revision_after ?? '未结算'}）`
       : '',
-    '请只读检查草稿工作区中的扩展代码并输出审核 JSON。',
+    '请只读检查草稿工作区中的扩展代码并输出审查 JSON。',
   ].join('\n\n');
 
-  // 审核会话只读：安全约束明确禁止修改文件（Plan 3.5：审核 AI 不拥有启用权限）
+  // 审查会话只读：安全约束明确禁止修改文件（审核 AI 不拥有启用权限）
   const security = [
-    '1. 本次会话为只读审核，禁止调用 edit / bash 等修改性工具。',
+    '1. 本次会话为只读审查，禁止调用 edit / bash 等修改性工具。',
     `2. 可用的只读工具：${REVIEW_TOOLS.join(', ') || 'read'}。`,
-    `3. 本地文档只读白名单（审核依据，仅可读取）：\n${docsAllowlist()}`,
-    '4. 不得读取草稿工作区之外的任何文件（白名单文档除外），不得读取 .env / 凭据 / 密钥类文件。',
-    '5. 禁止使用 web_fetch / web_search 联网搜索本项目（UniBot、扩展开发等）内容，审核依据以本地文档为准。',
-    '6. 你没有任何发布、启用或执行权限。',
+    `3. 本地文档只读白名单（审查依据，仅可读取）：\n${docsAllowlist()}`,
+    `4. 扩展市场注册表只读白名单（审查复用合理性，仅可读取）：\n${marketAllowlist()}`,
+    '5. 不得读取草稿工作区之外的任何文件（白名单文档/市场除外），不得读取 .env / 凭据 / 密钥类文件。',
+    '6. 允许 web_fetch 只读访问 GitHub 公开仓库（github.com）核对引用实现；其余联网需人工确认。',
+    '7. 你没有任何发布、启用或执行权限。',
   ].join('\n');
 
   await client.session.promptAsync({
@@ -156,28 +157,10 @@ export async function settleReview(draftId: string): Promise<ReviewResult> {
   };
   updateDraft(draftId, {
     review,
-    // 无 must_fix → 可发布；有 must_fix → 保持待调试（前端展示自动修复）
+    // 审查通过时记录文件摘要（发布前核对，Plan 3.4）
+    ...(status === 'passed' ? { review_revision: computeRevision(draftId) } : {}),
+    // 无 must_fix → 可发布；有 must_fix → 保持待修复（前端展示自动修复）
     status: status === 'passed' ? 'ready' : 'reviewing',
   });
   return review;
-}
-
-/**
- * 校验通过后的复核编排（Plan 3.5）：
- * - 启用 review 功能且尚未通过审核时，自动启动独立复核
- * - 返回是否触发了复核（调用方用于状态流转）
- */
-export async function maybeReviewAfterValidation(draftId: string): Promise<boolean> {
-  const draft = readDraft(draftId);
-  if (draft.status !== 'ready') return false;
-  if (!config.features.review) return false;
-  // 已通过审核则无需复核；未审核或审核未通过（调试后）→ 自动复核
-  if (draft.review && draft.review.status === 'passed') return false;
-  await startReview(draftId);
-  logger.info('review', '校验通过，自动启动复核', {
-    draft_id: draftId,
-    extension_id: draft.extension_id,
-    round: (draft.review?.round ?? 0) + 1,
-  });
-  return true;
 }

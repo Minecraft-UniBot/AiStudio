@@ -45,20 +45,19 @@ const reviewSummary = computed(() => props.draft.review?.summary ?? '')
       <details class="tech-detail">
         <summary>
           <Icon icon="lucide:chevron-down" width="13" />
-          技术详情（校验步骤与文件摘要）
+          技术详情（审查结果与文件摘要）
         </summary>
         <div class="tech-body">
-          <p v-for="step in draft.validation?.steps ?? []" :key="step.id" class="tech-step">
+          <p v-for="issue in draft.review?.issues ?? []" :key="issue.id" class="tech-step">
             <Icon
-              :icon="step.status === 'passed' ? 'lucide:check' : 'lucide:x'"
+              :icon="issue.severity === 'passed' ? 'lucide:check' : 'lucide:info'"
               width="12"
-              :class="step.status"
+              :class="issue.severity"
             />
-            {{ step.name }}
-            <span v-if="step.status !== 'passed'" class="tech-fail">未通过</span>
+            {{ issue.title }}
           </p>
           <p class="tech-revision mono">
-            文件摘要 {{ (draft.validation_revision ?? '').slice(0, 12) }}…
+            文件摘要 {{ (draft.review_revision ?? '').slice(0, 12) }}…
           </p>
         </div>
       </details>

@@ -4,15 +4,14 @@
  * 对应 Plan.md 第四章「状态模型」与第六章「后端 API 草案」。
  */
 
-/** 草稿主状态机 */
+/** 草稿主状态机（三阶段：规划 → 编码 → 审查） */
 export type DraftStatus =
-  | 'draft'       // 已创建，未开始生成
-  | 'generating'  // AI 生成中
-  | 'checking'    // 后台校验中
-  | 'repairing'   // AI 修复中（校验失败后的自动修复）
-  | 'reviewing'   // AI 审核中
-  | 'debugging'   // AI 调试中（审核问题修复）
-  | 'ready'       // 审核通过，可发布
+  | 'draft'       // 已创建，未开始
+  | 'planning'    // 规划中（AI 先询问需求，输出规划）
+  | 'coding'      // 编码中（自动加载对应 skill，实现代码）
+  | 'reviewing'   // 审查中（独立审核 AI 只读审查）
+  | 'debugging'   // 修复中（审查发现问题后的自动修复）
+  | 'ready'       // 审查通过，可发布
   | 'published'   // 已发布（只读）
   | 'failed'      // 连续无进展 / 超出轮次
   | 'error';      // 会话丢失等可恢复错误
@@ -109,8 +108,13 @@ export interface DraftMeta {
   model: ModelChoice | null;
   agent: string;
   review: ReviewResult | null;
+  /** 最近一次审查通过时的文件摘要（SHA-256），发布前必须核对 */
+  review_revision: string | null;
+  /** 规划产物（PLAN.md 内容摘要，供前端展示） */
+  plan_summary?: string | null;
+  /** 兼容旧版草稿：校验结果（新流程不再生成） */
   validation: ValidationRun | null;
-  /** 最近一次通过检查的文件摘要（SHA-256） */
+  /** 最近一次通过检查的文件摘要（SHA-256），兼容旧版 */
   validation_revision: string | null;
   /**
    * 最近一次回退的目标消息 ID（OpenCode revert 是「暂存式」：文件立即恢复，
@@ -143,7 +147,6 @@ export type StudioEvent =
   | { type: 'question.replied'; draft_id: string; question_id: string }
   | { type: 'question.rejected'; draft_id: string; question_id: string }
   | { type: 'draft.updated'; draft_id: string; status: DraftStatus }
-  | { type: 'validation.updated'; draft_id: string; run: ValidationRun }
   | { type: 'review.updated'; draft_id: string; review: ReviewResult }
   | { type: 'draft.published'; draft_id: string };
 

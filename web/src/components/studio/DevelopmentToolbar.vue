@@ -17,11 +17,9 @@ defineEmits(['back'])
 
 function statusVariant(status) {
   switch (status) {
-    case 'generating':
+    case 'planning':
+    case 'coding':
       return 'accent'
-    case 'checking':
-    case 'repairing':
-      return 'warning'
     case 'reviewing':
     case 'debugging':
       return 'accent'

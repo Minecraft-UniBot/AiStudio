@@ -66,7 +66,7 @@ export function use_studio_events() {
           break
       }
     }
-    if (event.type === 'validation.updated' && event.draft_id === store.currentDraft?.id) {
+    if (event.type === 'review.updated' && event.draft_id === store.currentDraft?.id) {
       store.refreshCurrent(event.draft_id)
     }
   }

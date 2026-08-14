@@ -136,6 +136,27 @@ export function docsAllowlist(): string {
   return docsAllowlistPaths().map((p) => `  - ${p}`).join('\n');
 }
 
+/**
+ * 扩展市场注册表只读白名单（注入到 OpenCode 会话的安全约束）。
+ * 市场注册表是仓库根目录 Market/extensions.json，AI 只读它来了解已有扩展，
+ * 优先复用已有能力、避免重复造轮子。
+ */
+export function marketAllowlistPaths(): string[] {
+  // Studio/server -> Studio -> 仓库根 -> Market/extensions.json
+  const repoRoot = join(import.meta.dir, '..', '..', '..');
+  return [join(repoRoot, 'Market', 'extensions.json')];
+}
+
+/** 市场注册表路径（供 planning/scaffold 提示词引用） */
+export function marketRegistryPath(): string {
+  return marketAllowlistPaths()[0]!;
+}
+
+/** 市场注册表格式化文本（注入安全约束） */
+export function marketAllowlist(): string {
+  return marketAllowlistPaths().map((p) => `  - ${p}`).join('\n');
+}
+
 /** 初始化平台数据目录结构 */
 export function ensureDataDirs() {
   for (const dir of [

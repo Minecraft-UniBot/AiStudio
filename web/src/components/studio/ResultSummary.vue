@@ -17,7 +17,7 @@ const emit = defineEmits(['publish'])
 const canPublishHint = computed(() => {
   const status = props.draft.status
   if (status === 'published') return '已发布，草稿为只读'
-  if (status !== 'ready') return '校验与审核通过后即可发布'
+  if (status !== 'ready') return '审查通过后即可发布'
   return ''
 })
 </script>

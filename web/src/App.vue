@@ -12,7 +12,7 @@ import { use_toast } from '@/composables/use_toast'
 const route = useRoute()
 const store = useStudioStore()
 const { start, stop } = use_studio_events()
-const { toast_list, dismiss_toast } = use_toast()
+const { toast_list, dismiss_toast, pause_toast, resume_toast } = use_toast()
 
 // 事件连接跟随登录状态：登录后（有 token）连接，登出后断开。
 // 不能只在 mount 时连接一次——登录发生在 LoginView，路由跳转后
@@ -42,15 +42,29 @@ onUnmounted(() => {
       <!-- 全局轻提示（Plan 9.5：alert/confirm 一律改用 toast） -->
       <div class="toast-container" role="status" aria-live="polite">
         <TransitionGroup name="toast">
-          <div v-for="toast in toast_list" :key="toast.id" class="toast-item" :class="toast.type">
-            <Icon
-              :icon="toast.type === 'success' ? 'lucide:check-circle-2' : toast.type === 'error' ? 'lucide:alert-circle' : 'lucide:info'"
-              width="15"
-            />
+          <div
+            v-for="toast in toast_list"
+            :key="toast.id"
+            class="toast-item"
+            :class="toast.type"
+            @mouseenter="pause_toast(toast.id)"
+            @mouseleave="resume_toast(toast.id)"
+          >
+            <span class="toast-icon-wrap">
+              <Icon
+                :icon="toast.type === 'success' ? 'lucide:check-circle-2' : toast.type === 'error' ? 'lucide:alert-circle' : 'lucide:info'"
+                width="15"
+              />
+            </span>
             <span class="toast-message">{{ toast.message }}</span>
             <button class="toast-close" title="关闭" @click="dismiss_toast(toast.id)">
               <Icon icon="lucide:x" width="13" />
             </button>
+            <span
+              v-if="toast.duration > 0"
+              class="toast-progress"
+              :style="{ animationDuration: `${toast.duration}ms` }"
+            />
           </div>
         </TransitionGroup>
       </div>
@@ -71,43 +85,51 @@ onUnmounted(() => {
   right: 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   z-index: var(--z-tooltip);
   pointer-events: none;
+  max-width: min(400px, calc(100vw - 28px));
 }
 
 .toast-item {
+  position: relative;
   pointer-events: auto;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 240px;
-  max-width: 380px;
-  padding: 10px 12px;
-  background: var(--surface);
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 14px 14px;
+  background: rgb(255 255 255 / 0.92);
+  backdrop-filter: blur(10px);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.1);
   font-size: var(--text-sm);
+  overflow: hidden;
 }
 
-.toast-item.success {
-  border-color: #bbf7d0;
+.toast-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+  margin-top: -1px;
 }
 
-.toast-item.success svg {
+.toast-item.success .toast-icon-wrap {
+  background: var(--success-soft);
   color: var(--success);
 }
 
-.toast-item.error {
-  border-color: #fecaca;
-}
-
-.toast-item.error svg {
+.toast-item.error .toast-icon-wrap {
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
-.toast-item.info svg {
+.toast-item.info .toast-icon-wrap {
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -115,18 +137,30 @@ onUnmounted(() => {
   flex: 1;
   color: var(--text);
   line-height: 1.45;
+  word-break: break-word;
 }
 
 .toast-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
+  opacity: 0;
+  transition:
+    opacity var(--transition),
+    background-color var(--transition),
+    color var(--transition);
+}
+
+.toast-item:hover .toast-close {
+  opacity: 1;
 }
 
 .toast-close:hover {
@@ -134,17 +168,61 @@ onUnmounted(() => {
   color: var(--text);
 }
 
-.toast-enter-active,
+/* 倒计时进度条：随 toast 生命周期从满到空，悬停时暂停 */
+.toast-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  transform-origin: left;
+  border-radius: 0 0 0 var(--radius-lg);
+  animation-name: toast-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.toast-item.success .toast-progress {
+  background: var(--success);
+}
+
+.toast-item.error .toast-progress {
+  background: var(--danger);
+}
+
+.toast-item.info .toast-progress {
+  background: var(--accent);
+}
+
+.toast-item:hover .toast-progress {
+  animation-play-state: paused;
+}
+
+@keyframes toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.toast-enter-active {
+  transition:
+    opacity 220ms ease-out,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .toast-leave-active {
   transition:
-    opacity 180ms ease-out,
-    transform 180ms ease-out;
+    opacity 160ms ease-in,
+    transform 160ms ease-in;
 }
 
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(12px);
+  transform: translateX(28px) scale(0.96);
 }
 </style>
 

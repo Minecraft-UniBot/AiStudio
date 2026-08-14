@@ -1,5 +1,5 @@
 <script setup>
-// 平台设置：功能开关、OpenCode 工具注册表、提示词管理（版本化）、校验步骤编排
+// 平台设置：功能开关、OpenCode 工具注册表、提示词管理（版本化）
 import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
@@ -20,7 +20,6 @@ const { success: toast_success, error: toast_error } = use_toast()
 const settings = ref(null)
 const tools = ref([])
 const prompts = ref([])
-const validationSteps = ref([])
 const saving = ref(false)
 
 // 提示词编辑
@@ -39,12 +38,10 @@ async function loadAll() {
     api('/settings'),
     api('/tools'),
     api('/prompts'),
-    api('/validation/steps'),
   ])
   if (results[0].status === 'fulfilled') settings.value = results[0].value
   if (results[1].status === 'fulfilled') tools.value = results[1].value
   if (results[2].status === 'fulfilled') prompts.value = results[2].value
-  if (results[3].status === 'fulfilled') validationSteps.value = results[3].value
 }
 
 async function saveSettings() {
@@ -113,39 +110,6 @@ async function activateVersion(prompt, version) {
     prompts.value = await api('/prompts')
   } catch (e) {
     toast_error(e.message)
-  }
-}
-
-// ===== 校验步骤编排（Plan 8.3：启停 + 排序） =====
-async function toggleValidationStep(step) {
-  step.enabled = !step.enabled
-  await persistValidationSteps()
-}
-
-async function moveValidationStep(step, direction) {
-  const idx = validationSteps.value.findIndex((item) => item.id === step.id)
-  const target = idx + direction
-  if (target < 0 || target >= validationSteps.value.length) return
-  const [moved] = validationSteps.value.splice(idx, 1)
-  validationSteps.value.splice(target, 0, moved)
-  await persistValidationSteps()
-}
-
-async function persistValidationSteps() {
-  try {
-    const next = await api('/validation/steps', {
-      method: 'PATCH',
-      body: validationSteps.value.map((step, index) => ({
-        id: step.id,
-        enabled: step.enabled,
-        order: index,
-      })),
-    })
-    validationSteps.value = next
-    toast_success('校验步骤已更新')
-  } catch (e) {
-    toast_error(e.message)
-    validationSteps.value = await api('/validation/steps')
   }
 }
 
@@ -224,45 +188,6 @@ function permissionVariant(permission) {
               </Badge>
               <Button size="sm" :variant="tool.enabled ? 'primary' : 'secondary'" @click="toggleTool(tool)">
                 {{ tool.enabled ? '已启用' : '已停用' }}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 校验步骤编排（Plan 8.3） -->
-      <section class="card">
-        <h3>校验步骤编排</h3>
-        <p class="card-sub">可独立启停、调整顺序；保存后立即生效。</p>
-        <div class="step-order-list">
-          <div v-for="(step, index) in validationSteps" :key="step.id" class="step-order-item">
-            <div class="step-order-info">
-              <span class="order-badge mono">{{ index + 1 }}</span>
-              <span class="step-order-name">{{ step.name }}</span>
-            </div>
-            <div class="step-order-actions">
-              <Button
-                variant="ghost"
-                icon-only
-                size="sm"
-                title="上移"
-                :disabled="index === 0"
-                @click="moveValidationStep(step, -1)"
-              >
-                <Icon icon="lucide:chevron-up" width="14" />
-              </Button>
-              <Button
-                variant="ghost"
-                icon-only
-                size="sm"
-                title="下移"
-                :disabled="index === validationSteps.length - 1"
-                @click="moveValidationStep(step, 1)"
-              >
-                <Icon icon="lucide:chevron-down" width="14" />
-              </Button>
-              <Button size="sm" :variant="step.enabled ? 'primary' : 'secondary'" @click="toggleValidationStep(step)">
-                {{ step.enabled ? '已启用' : '已停用' }}
               </Button>
             </div>
           </div>
@@ -400,8 +325,7 @@ function permissionVariant(permission) {
 
 .feature-list,
 .tool-list,
-.prompt-list,
-.step-order-list {
+.prompt-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -439,7 +363,6 @@ function permissionVariant(permission) {
 }
 
 .tool-item,
-.step-order-item,
 .prompt-item {
   display: flex;
   align-items: center;
@@ -465,39 +388,11 @@ function permissionVariant(permission) {
 }
 
 .tool-meta,
-.prompt-actions,
-.step-order-actions {
+.prompt-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-}
-
-.step-order-item {
-  justify-content: space-between;
-}
-
-.step-order-info {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.order-badge {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 600;
-}
-
-.step-order-name {
-  font-size: var(--text-sm);
 }
 
 .version-select {

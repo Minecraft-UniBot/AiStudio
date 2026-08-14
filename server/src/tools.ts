@@ -34,18 +34,18 @@ const DEFAULT_TOOLS: ToolEntry[] = [
     note: '执行命令（默认询问，后端二次校验命令与工作目录）',
   },
   {
+    id: 'web_fetch',
+    enabled: true,
+    default_permission: 'ask',
+    phases: ['generate', 'review', 'debug'],
+    note: '抓取网页（github.com 公开仓库只读自动放行，用于参考已有扩展；其余需人工确认）',
+  },
+  {
     id: 'web_search',
     enabled: false,
     default_permission: 'ask',
     phases: ['generate'],
     note: '网络搜索（默认关闭：本项目文档在本地，禁止搜索 UniBot 相关内容）',
-  },
-  {
-    id: 'web_fetch',
-    enabled: false,
-    default_permission: 'ask',
-    phases: ['generate'],
-    note: '抓取网页（默认关闭：本项目文档在本地，禁止抓取 UniBot 相关内容）',
   },
 ];
 

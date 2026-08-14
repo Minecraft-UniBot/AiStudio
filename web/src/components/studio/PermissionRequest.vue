@@ -45,7 +45,10 @@ function metaText() {
       <div class="perm-icon-wrap">
         <Icon icon="lucide:shield-alert" width="15" class="perm-icon" />
       </div>
-      <span class="perm-title">需要授权</span>
+      <div class="perm-titles">
+        <span class="perm-title">需要授权</span>
+        <span class="perm-subtitle">AI 请求执行以下操作</span>
+      </div>
       <Badge variant="warning" class="perm-tool">{{ permission.tool_name || permission.permission }}</Badge>
     </div>
     <div class="perm-meta">
@@ -63,14 +66,26 @@ function metaText() {
 
 <style scoped>
 .permission-card {
-  border: 1px solid #fde68a;
-  background: #fffaeb;
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
+  position: relative;
+  border: 1px solid #fcd34d;
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 72%);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  box-shadow: var(--shadow);
+  gap: var(--space-2);
+  box-shadow: 0 2px 8px rgb(217 119 6 / 0.08);
+  overflow: hidden;
+}
+
+.permission-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #f59e0b, #fbbf24);
 }
 
 .perm-head {
@@ -87,7 +102,7 @@ function metaText() {
   width: 26px;
   height: 26px;
   border-radius: var(--radius);
-  background: var(--warning-soft);
+  background: #fef3c7;
   border: 1px solid #fde68a;
   flex-shrink: 0;
 }
@@ -96,13 +111,27 @@ function metaText() {
   color: var(--warning);
 }
 
+.perm-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .perm-title {
   font-weight: 600;
   color: var(--text);
+  line-height: 1.3;
+}
+
+.perm-subtitle {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.3;
 }
 
 .perm-tool {
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .perm-meta {
@@ -119,7 +148,7 @@ function metaText() {
 }
 
 .perm-meta-icon {
-  color: var(--text-muted);
+  color: var(--warning);
   flex-shrink: 0;
 }
 

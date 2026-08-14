@@ -99,11 +99,7 @@ export const useStudioStore = defineStore('studio', () => {
     return data.content
   }
 
-  // ---- 校验 / 审核 / 发布 ----
-  async function runValidation(id) {
-    return await api(`/drafts/${id}/validate`, { method: 'POST' })
-  }
-
+  // ---- 审查 / 发布 ----
   async function startReview(id) {
     return await api(`/drafts/${id}/review`, { method: 'POST' })
   }
@@ -156,10 +152,10 @@ export const useStudioStore = defineStore('studio', () => {
 
   // ---- 状态刷新 ----
   async function refreshCurrent(id) {
-    const before = currentDraft.value?.validation_revision
+    const before = currentDraft.value?.review_revision
     currentDraft.value = await api(`/drafts/${id}`)
-    // 校验结果或摘要变化时刷新消息与文件
-    if (before !== currentDraft.value?.validation_revision) {
+    // 审查结果或摘要变化时刷新消息与文件
+    if (before !== currentDraft.value?.review_revision) {
       fetchMessages(id).catch(() => {})
       fetchFiles(id).catch(() => {})
     }
@@ -247,7 +243,6 @@ export const useStudioStore = defineStore('studio', () => {
     fetchTodo,
     fetchFiles,
     fetchFileContent,
-    runValidation,
     startReview,
     fetchReview,
     startDebug,

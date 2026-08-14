@@ -1,24 +1,25 @@
 /**
- * 自动调试编排（对应 Plan.md 3.5 与状态模型）：
- * - 调试阶段消费审核问题单（must_fix）修改草稿
- * - 每轮记录调试前/后文件摘要，用于无进展检测
+ * 自动修复编排（三阶段流程的修复阶段）：
+ * - 修复阶段消费审查问题单（must_fix）修改草稿
+ * - 每轮记录修复前/后文件摘要，用于无进展检测
  * - 默认最多 3 轮；连续两轮无进展时熔断置为 failed，停止自动修改
- * - 调试完成后由事件层触发重新校验与复核（见 events.ts）
+ * - 修复完成后由事件层触发重新审查（见 events.ts）
  */
 import { computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
 import { opencode } from './opencode';
-import { config, docsAllowlist } from './config';
+import { config, docsAllowlist, marketAllowlist } from './config';
 import { trackSession } from './sessions';
 import { logger } from './logger';
 import type { ReviewIssue, ReviewResult } from './types';
 
-const DEBUG_SYSTEM_PROMPT = `你是 UniBot 扩展修复工程师。根据审核问题单修改草稿扩展。
+const DEBUG_SYSTEM_PROMPT = `你是 UniBot 扩展修复工程师。根据审查问题单修改草稿扩展。
 约束：
 - 只能修改草稿工作区内的文件
 - 只修复问题单中列出的问题，不擅自重构或新增功能
 - 修复后重新运行相关测试（如存在 tests/）
-- 规范疑问以本地文档为准（只读白名单，仅可读取）：\n${docsAllowlist()}
-- 禁止使用 web_fetch / web_search 联网搜索本项目（UniBot、扩展开发等）内容
+- 规范疑问以 Studio 内文档副本为准（只读白名单，仅可读取）：\n${docsAllowlist()}
+- 可只读参考扩展市场注册表（复用已有能力）：\n${marketAllowlist()}
+- 禁止使用 web_search 联网搜索本项目（UniBot、扩展开发等）内容；GitHub 公开仓库（github.com）只读参考自动放行
 - 完成后用简短中文总结修改内容`;
 
 export interface DebugOutcome {
@@ -44,34 +45,31 @@ function mustFixIssues(issues: ReviewIssue[]): ReviewIssue[] {
 }
 
 /**
- * 启动自动调试：根据审核问题单让主会话修复。
- * 校验失败后的自动修复（repairing）也走此入口，按失败摘要构造问题单。
+ * 启动自动修复：根据审查问题单（must_fix）让主会话修改草稿。
+ * 修复完成后由事件层重新审查（settleAndRecheck）。
  */
 export async function startDebugging(
   draftId: string,
   issues: ReviewIssue[] | null = null,
-  kind: 'review' | 'validation' = 'review',
 ): Promise<ReviewResult> {
   const draft = readDraft(draftId);
   const review = draft.review;
   const maxRounds = config.defaults.max_review_rounds;
 
-  // 从调用方传入的问题单，或草稿现有审核问题单
+  // 从调用方传入的问题单，或草稿现有审查问题单
   let mustFix: ReviewIssue[];
   if (issues) {
     mustFix = issues.filter((i) => i.severity === 'must_fix');
   } else {
-    if (!review) throw new Error('无审核结果可调试');
+    if (!review) throw new Error('无审查结果可修复');
     mustFix = mustFixIssues(review.issues);
   }
 
-  if (kind === 'review') {
-    const round = review!.round;
-    if (round >= maxRounds) {
-      updateDraft(draftId, { status: 'failed', error: `自动调试已超过 ${maxRounds} 轮上限` });
-      logger.warn('review', '超出调试轮次上限，草稿置为 failed', { draft_id: draftId, round, max_rounds: maxRounds });
-      throw new Error('已达到最大调试轮次，请在平台补充需求或重新生成');
-    }
+  const currentRound = review?.round ?? 0;
+  if (currentRound >= maxRounds) {
+    updateDraft(draftId, { status: 'failed', error: `自动修复已超过 ${maxRounds} 轮上限` });
+    logger.warn('review', '超出修复轮次上限，草稿置为 failed', { draft_id: draftId, round: currentRound, max_rounds: maxRounds });
+    throw new Error('已达到最大修复轮次，请在平台补充需求或重新开始');
   }
 
   if (mustFix.length === 0) {
@@ -95,22 +93,21 @@ export async function startDebugging(
     trackSession(draftId, sessionId);
   }
 
-  const status: 'repairing' | 'debugging' = kind === 'validation' ? 'repairing' : 'debugging';
-  updateDraft(draftId, { status, session_id: sessionId });
-  logger.info('debug', `开始自动${kind === 'validation' ? '修复' : '调试'}`, {
+  updateDraft(draftId, { status: 'debugging', session_id: sessionId });
+  logger.info('debug', '开始自动修复', {
     draft_id: draftId,
     extension_id: draft.extension_id,
-    round: kind === 'review' ? review!.round + 1 : undefined,
+    round: review ? review.round + 1 : 1,
     max_rounds: maxRounds,
     must_fix: mustFix.length,
     session_id: sessionId,
   });
 
-  const round = kind === 'review' ? review!.round + 1 : 1;
+  const round = review ? review.round + 1 : 1;
   const issueList = mustFix
     .map((i) => `- [${i.severity}] ${i.title}（${i.file ?? '未知文件'}）\n  ${i.detail}\n  建议：${i.suggestion ?? '无'}`)
     .join('\n');
-  const prompt = `请修复以下${kind === 'validation' ? '校验' : '审核'}问题（第 ${round} 轮）：\n\n${issueList}\n\n修复完成后简要说明改动。`;
+  const prompt = `请修复以下审查问题（第 ${round} 轮）：\n\n${issueList}\n\n修复完成后简要说明改动。`;
 
   await client.session.promptAsync({
     path: { id: sessionId },
@@ -181,12 +178,12 @@ export async function settleDebugging(draftId: string): Promise<DebugOutcome> {
     return { changed: false, fatal: true, review: { ...review, rounds, status: 'failed' } };
   }
 
-  // 有进展：回到 checking，由事件层自动重新校验 → 复核
+  // 有进展：回到 reviewing，由事件层自动重新审查
   updateDraft(draftId, {
-    status: 'checking',
+    status: 'reviewing',
     review: { ...review, rounds, updated_at: new Date().toISOString() },
   });
-  logger.info('debug', '调试完成（有进展），准备重新校验', {
+  logger.info('debug', '修复完成（有进展），准备重新审查', {
     draft_id: draftId,
     extension_id: draft.extension_id,
     round: rounds.length,
