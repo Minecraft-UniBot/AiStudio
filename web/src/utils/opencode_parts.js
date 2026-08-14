@@ -40,10 +40,18 @@ export function normalize_part(part) {
   }
 }
 
+/** 从 ToolState.time 提取起止时间戳（ms）；无数据返回 null */
+function state_time(state) {
+  const time = state?.time
+  if (!time || typeof time.start !== 'number') return null
+  return { start: time.start, end: typeof time.end === 'number' ? time.end : null }
+}
+
 /** 归一化工具调用 part → 稳定的扁平视图模型 */
 export function normalize_tool(part) {
   const state = part.state ?? {}
   const input = state.input ?? {}
+  const { start, end } = state_time(state) ?? {}
   const base = {
     type: 'tool',
     id: String(part.id ?? part.callID ?? ''),
@@ -54,6 +62,8 @@ export function normalize_tool(part) {
     label: tool_label(part),
     output: stringify(state.output),
     error: stringify(state.error),
+    start,
+    end,
   }
   // todowrite：把 input.todos 结构化为待办清单视图模型
   if (base.name === 'todowrite' && Array.isArray(input.todos)) {
@@ -128,6 +138,24 @@ function basename(path) {
   const cleaned = String(path).replace(/\/+$/, '')
   const seg = cleaned.split('/').pop()
   return seg || cleaned
+}
+
+/** 耗时格式化：<1s 毫秒，<1min 秒，更久分+秒 */
+export function format_duration(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return ''
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${Math.round(s % 60)}s`
+}
+
+/** 工具自身执行耗时（start → end）；兼容归一化前后两种结构 */
+export function tool_duration(part) {
+  const start = part?.start ?? part?.state?.time?.start
+  const end = part?.end ?? part?.state?.time?.end
+  if (typeof start !== 'number' || typeof end !== 'number') return ''
+  return format_duration(end - start)
 }
 
 /** 工具执行结果正文（completed → output，error → error；兼容归一化前后两种结构） */

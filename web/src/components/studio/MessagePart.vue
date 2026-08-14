@@ -3,7 +3,7 @@
 // parts 统一经 utils/opencode_parts.js 归一化，不直接依赖 OpenCode 原始字段
 import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import { normalize_parts, tool_status, tool_label, tool_result } from '@/utils/opencode_parts'
+import { normalize_parts, tool_status, tool_label, tool_result, format_duration } from '@/utils/opencode_parts'
 import { render_markdown } from '@/utils/markdown'
 
 const props = defineProps({
@@ -57,6 +57,13 @@ function toggle_tool(part, idx) {
   else next.add(key)
   expanded_tools.value = next
 }
+
+/** 本条消息总耗时（消息完成 − AI 开始输出，ms）；消息未完成或无数据返回空 */
+const msg_elapsed = computed(() => {
+  const t = props.message.info?.time
+  if (!t || typeof t.created !== 'number' || typeof t.completed !== 'number') return ''
+  return format_duration(t.completed - t.created)
+})
 
 /** markdown 渲染（仅 AI 内容使用；用户消息保持纯文本） */
 function md_text(text) {
@@ -136,6 +143,11 @@ function todo_priority_class(priority) {
       <template v-if="parts.length === 0">
         <div v-if="summary" class="markdown-body" v-html="md_text(summary)"></div>
         <p v-else-if="isUser" class="plain-text muted">…</p>
+        <!-- 兜底占位：AI 已响应但 parts 尚未生成内容时，避免只剩一条空白线 -->
+        <div v-else class="thinking-placeholder">
+          <Icon icon="lucide:loader-2" width="13" />
+          <span>AI 正在思考…</span>
+        </div>
       </template>
       <template v-else>
         <div v-for="(part, idx) in parts" :key="part.id ?? idx" class="part" :class="part.type">
@@ -147,13 +159,20 @@ function todo_priority_class(priority) {
             v-html="md_text(part.text)"
           ></div>
 
-          <!-- 推理摘要 -->
+          <!-- 推理摘要：思考中显示占位，有内容后展示思考过程（默认收起，可展开） -->
           <details v-if="part.type === 'reasoning' && part.text" class="reasoning">
             <summary>
               <Icon icon="lucide:brain" width="13" /> 思考过程
             </summary>
             <div class="reasoning-body markdown-body" v-html="md_text(part.text)"></div>
           </details>
+          <!-- 思考中占位：reasoning part 已出现但尚无文本时，保留思考栏 -->
+          <div v-else-if="part.type === 'reasoning'" class="reasoning thinking">
+            <div class="thinking-head">
+              <Icon icon="lucide:brain" width="13" />
+              <span>正在思考…</span>
+            </div>
+          </div>
 
           <!-- 工具调用：执行中展开，完成/失败默认收起，点击头部展开 -->
           <div
@@ -237,10 +256,13 @@ function todo_priority_class(priority) {
             >{{ tool_result(part) }}</pre>
           </div>
 
-          <!-- 步骤（仅保留完成提示） -->
+          <!-- 步骤完成：显示本条消息总耗时 -->
           <div v-if="part.type === 'step-finish'" class="step-line">
             <Icon :icon="partIcon('step-finish')" width="13" />
             <span>完成{{ part.reason ? `（${part.reason}）` : '' }}</span>
+            <span v-if="msg_elapsed" class="step-duration mono" :title="'本条消息总耗时'">
+              {{ msg_elapsed }}
+            </span>
           </div>
 
           <!-- 子任务 / 重试 / 文件 -->
@@ -540,6 +562,46 @@ function todo_priority_class(priority) {
   margin-bottom: 0;
 }
 
+/* 思考中占位：reasoning part 尚无文本时保留思考栏 */
+.reasoning.thinking {
+  padding: var(--space-2) var(--space-3);
+}
+
+.thinking-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.thinking-head::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* 整条消息无任何内容时的思考占位 */
+.thinking-placeholder {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.thinking-placeholder :deep(svg) {
+  color: var(--accent);
+  animation: spin 1s linear infinite;
+}
+
 /* 用户消息的 markdown 文本：与 AI 文本保持一致的排版 */
 .user-text {
   color: var(--text);
@@ -820,6 +882,18 @@ function todo_priority_class(priority) {
   font-size: var(--text-xs);
   color: var(--text-secondary);
   padding: var(--space-1) 0;
+}
+
+/* 「完成」行旁的耗时徽章 */
+.step-duration {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
 }
 
 .step-line.warning-text {
