@@ -1,11 +1,21 @@
 ---
 name: scaffold
-version: 1
+version: 2
 ---
 
 # 生成任务
 
 为用户创建 UniBot 扩展「{{name}}」（{{extension_id}}，类型：{{types}}）。
+
+## 第一步：先读本地文档，禁止联网搜索
+
+动手写代码前，**必须**先只读 Studio 内文档副本（`prompts/docs/`，后端已加入只读白名单）：
+
+1. `开发插件.md`——开发总览、扩展实例、两阶段绑定、能力注册、目录约定
+2. `扩展系统.md`——扩展类型、清单（Extension.toml）字段与校验、依赖声明
+3. 涉及配置时再读 `配置说明.md`；编写代码时按需查阅 `编码规范.md`
+
+**禁止**用 web_fetch / web_search 搜索「UniBot 扩展」相关内容。第三方库（nonebot2 / alconna / pydantic）用法以本地已安装包为准，确需查官方文档须先征得用户同意。
 
 ## 原始需求
 

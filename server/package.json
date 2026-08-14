@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync:docs": "bun scripts/sync_docs.ts"
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.18",
