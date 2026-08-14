@@ -9,9 +9,11 @@
 import { onUnmounted } from 'vue'
 import { connectEvents } from '@/utils/api'
 import { useStudioStore } from '@/stores/studio'
+import { use_toast } from '@/composables/use_toast'
 
 export function use_studio_events() {
   const store = useStudioStore()
+  const toast = use_toast()
   let disconnect = null
 
   /** 处理归一化事件：按类型刷新 store 状态 */
@@ -43,6 +45,15 @@ export function use_studio_events() {
           break
         case 'permission.replied':
           store.removePendingPermission(event.permission_id)
+          break
+        case 'permission.auto_granted':
+          // 后端已自动放行白名单文档读取，不弹权限框，仅提示
+          if (event.permission?.id) {
+            store.removePendingPermission(event.permission.id)
+          }
+          if (event.permission?.description) {
+            toast.info(`已自动允许读取文档：${event.permission.description}`)
+          }
           break
         case 'question.asked':
           store.pushPendingQuestion(event.question)

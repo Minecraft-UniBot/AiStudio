@@ -7,7 +7,7 @@
  */
 import { computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
 import { opencode } from './opencode';
-import { config } from './config';
+import { config, docsAllowlist } from './config';
 import { trackSession } from './sessions';
 import { logger } from './logger';
 import type { ReviewIssue, ReviewResult } from './types';
@@ -17,6 +17,8 @@ const DEBUG_SYSTEM_PROMPT = `你是 UniBot 扩展修复工程师。根据审核�
 - 只能修改草稿工作区内的文件
 - 只修复问题单中列出的问题，不擅自重构或新增功能
 - 修复后重新运行相关测试（如存在 tests/）
+- 规范疑问以本地文档为准（只读白名单，仅可读取）：\n${docsAllowlist()}
+- 禁止使用 web_fetch / web_search 联网搜索本项目（UniBot、扩展开发等）内容
 - 完成后用简短中文总结修改内容`;
 
 export interface DebugOutcome {

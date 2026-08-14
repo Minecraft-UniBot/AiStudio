@@ -82,6 +82,27 @@ class OpenCodeGateway {
     restarts: 0,
   };
   private stopping = false;
+  private parentExitHandler: (() => void) | null = null;
+
+  /**
+   * 注册进程级兜底：无论父进程正常退出、崩溃还是被 bun --watch 热重载，
+   * 都确保 opencode 子进程被终止，避免残留实例继续占用共享数据目录
+   *（残留实例会吃掉 SSE 事件——权限/问题窗口收不到就是这种错位的表现）。
+   * SIGKILL 无法捕获（进程直接被终结时不触发 'exit'），其余退出路径均覆盖。
+   */
+  private ensureParentExitCleanup() {
+    if (this.parentExitHandler) return;
+    this.parentExitHandler = () => {
+      if (this.process && !this.process.killed) {
+        try {
+          this.process.kill('SIGKILL');
+        } catch {
+          // 进程可能已退出
+        }
+      }
+    };
+    process.on('exit', this.parentExitHandler);
+  }
 
   getStatus(): OpenCodeStatus {
     return { ...this.status };
@@ -140,6 +161,31 @@ class OpenCodeGateway {
     });
   }
 
+  /**
+   * 列出当前 opencode 实例所有待处理权限请求（`GET /permission`）。
+   * SDK 1.18 未生成 permission API，复用 SDK 底层 client 的 get。
+   * 用途：SSE 事件丢失/断线重连后，前端可主动拉取补出权限弹窗
+   *（opencode 的 pending 权限在进程内存，只要 opencode 实例未重启就仍可恢复）。
+   */
+  async listPendingPermissions(directory?: string): Promise<Array<Record<string, unknown>>> {
+    const raw = this.getClient() as unknown as {
+      _client: {
+        get(options: {
+          url: string;
+          query?: { directory?: string };
+          throwOnError?: boolean;
+        }): Promise<{ data?: unknown }>;
+      };
+    };
+    const res = await raw._client.get({
+      url: '/permission',
+      ...(directory ? { query: { directory } } : {}),
+      throwOnError: true,
+    });
+    const data = res?.data;
+    return Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+  }
+
   getDirectory(): string {
     return config.opencode.data_dir;
   }
@@ -152,6 +198,7 @@ class OpenCodeGateway {
   }
 
   private async launch() {
+    this.ensureParentExitCleanup();
     const bin = config.opencode.bin;
     // 获取随机空闲端口
     this.port = await getFreePort();

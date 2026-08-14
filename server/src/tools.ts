@@ -38,7 +38,14 @@ const DEFAULT_TOOLS: ToolEntry[] = [
     enabled: false,
     default_permission: 'ask',
     phases: ['generate'],
-    note: '网络搜索（默认关闭，不支持静默永久放行）',
+    note: '网络搜索（默认关闭：本项目文档在本地，禁止搜索 UniBot 相关内容）',
+  },
+  {
+    id: 'web_fetch',
+    enabled: false,
+    default_permission: 'ask',
+    phases: ['generate'],
+    note: '抓取网页（默认关闭：本项目文档在本地，禁止抓取 UniBot 相关内容）',
   },
 ];
 

@@ -126,7 +126,20 @@ function onKeydown(e) {
 <template>
   <main class="conversation-panel">
     <div ref="scrollEl" class="message-scroll">
-      <!-- 待处理权限 -->
+      <!-- 消息流 -->
+      <EmptyState
+        v-if="messages.length === 0"
+        icon="lucide:sparkles"
+        title="AI 正在创建扩展"
+        description="基于你的描述自动生成清单、配置和实现"
+      />
+      <MessagePart
+        v-for="msg in messages"
+        :key="msg.info?.id"
+        :message="msg"
+        @revert="(messageId) => emit('revert-message', messageId)"
+      />
+      <!-- 待处理权限（贴近输入框，AI 卡在权限时置顶关注） -->
       <div v-for="permission in pendingPermissions" :key="permission.id" class="pending-item">
         <PermissionRequest
           :draft-id="draftId"
@@ -170,19 +183,6 @@ function onKeydown(e) {
           </Button>
         </div>
       </div>
-      <!-- 消息流 -->
-      <EmptyState
-        v-if="messages.length === 0"
-        icon="lucide:sparkles"
-        title="AI 正在创建扩展"
-        description="基于你的描述自动生成清单、配置和实现"
-      />
-      <MessagePart
-        v-for="msg in messages"
-        :key="msg.info?.id"
-        :message="msg"
-        @revert="(messageId) => emit('revert-message', messageId)"
-      />
       <div ref="messageEl" />
     </div>
 

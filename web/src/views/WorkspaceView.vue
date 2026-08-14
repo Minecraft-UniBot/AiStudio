@@ -147,6 +147,8 @@ async function refreshAll() {
   await store.fetchMessages(draftId)
   await store.fetchDiff(draftId)
   await store.fetchTodo(draftId)
+  // 兜底补推 pending 权限（SSE 事件丢失时也能弹出权限窗口）
+  await store.fetchPendingPermissions(draftId)
   await Promise.all([store.fetchMessages(draftId), loadFiles()])
 }
 

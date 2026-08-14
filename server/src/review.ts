@@ -7,7 +7,7 @@
  */
 import { readDraft, updateDraft, draftWorkspace } from './drafts';
 import { opencode } from './opencode';
-import { config } from './config';
+import { config, docsAllowlist } from './config';
 import { trackSession } from './sessions';
 import { logger } from './logger';
 import { renderPromptWithSecurity } from './prompts';
@@ -87,8 +87,10 @@ export async function startReview(draftId: string): Promise<ReviewResult> {
   const security = [
     '1. 本次会话为只读审核，禁止调用 edit / bash 等修改性工具。',
     `2. 可用的只读工具：${REVIEW_TOOLS.join(', ') || 'read'}。`,
-    '3. 不得读取草稿工作区之外的任何文件，不得读取 .env / 凭据 / 密钥类文件。',
-    '4. 你没有任何发布、启用或执行权限。',
+    `3. 本地文档只读白名单（审核依据，仅可读取）：\n${docsAllowlist()}`,
+    '4. 不得读取草稿工作区之外的任何文件（白名单文档除外），不得读取 .env / 凭据 / 密钥类文件。',
+    '5. 禁止使用 web_fetch / web_search 联网搜索本项目（UniBot、扩展开发等）内容，审核依据以本地文档为准。',
+    '6. 你没有任何发布、启用或执行权限。',
   ].join('\n');
 
   await client.session.promptAsync({

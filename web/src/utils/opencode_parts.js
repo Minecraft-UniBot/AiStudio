@@ -73,7 +73,9 @@ export function normalize_tool(part) {
       priority: String(t?.priority ?? 'medium'),
     }))
   }
-  // question：AI 提问工具（向用户确认），结构化为问题卡片
+  // question：AI 提问工具（向用户确认），结构化为问题卡片。
+  // 工具完成后 opencode 会把用户回答回填到 state.metadata.answers（每题一个数组），
+  // 前端据此直接展示回答，不再显示选项列表。
   if (base.name === 'question' && Array.isArray(input.questions)) {
     base.questions = input.questions.map((q) => ({
       header: String(q?.header ?? ''),
@@ -85,6 +87,10 @@ export function normalize_tool(part) {
           }))
         : [],
     }))
+    const answers = state.metadata?.answers
+    if (Array.isArray(answers)) {
+      base.answers = answers.map((a) => (Array.isArray(a) ? a.map(String) : [String(a ?? '')]))
+    }
   }
   // read：从 output 的 XML 包装 <content>…</content> 中提取文件内容（去掉路径/类型标签）
   if (base.name === 'read') {

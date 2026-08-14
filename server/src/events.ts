@@ -10,13 +10,16 @@
  * 断线重连后前端先通过 REST 恢复状态，再继续消费实时事件。
  */
 import type { ServerWebSocket } from 'bun';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { opencode } from './opencode';
-import { readDraft, updateDraft } from './drafts';
+import { readDraft, updateDraft, draftWorkspace } from './drafts';
 import { settleDebugging } from './debugging';
 import { settleReview, startReview } from './review';
 import { runValidation } from './validation';
 import { draftIdForSession, getWorkspaces } from './sessions';
 import { logger } from './logger';
+import { docsAllowlistPaths } from './config';
 import type { PermissionRequest, QuestionRequest, StudioEvent } from './types';
 
 const WS_CLIENTS = new Set<ServerWebSocket<unknown>>();
@@ -50,6 +53,108 @@ function stringifyError(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === undefined || value === null) return '未知错误';
   return JSON.stringify(value);
+}
+
+/** 展开 ~ 前缀并规范化为绝对路径（与白名单路径比较用） */
+function normalizePath(value: string): string {
+  const expanded = value.startsWith('~/') ? join(homedir(), value.slice(2)) : value;
+  try {
+    return resolve(expanded);
+  } catch {
+    return expanded;
+  }
+}
+
+/**
+ * 判断权限请求是否命中本地文档白名单（读工作区外文档触发的是 external_directory，
+ * 工作区内 read 通常已被配置放行，因此两类权限名都认）。
+ * 命中的文档读取由后端自动放行（once），不推送到前端弹窗；
+ * 其它权限（edit / bash / 白名单外路径）保持原样询问。
+ */
+function matchesDocsAllowlist(permission: PermissionRequest): boolean {
+  const tool = (permission.tool_name || permission.permission || '').toLowerCase();
+  if (tool !== 'read' && tool !== 'external_directory') return false;
+  const allowlist = docsAllowlistPaths();
+  const candidates: string[] = [];
+  if (typeof permission.metadata?.filepath === 'string') {
+    candidates.push(permission.metadata.filepath);
+  }
+  if (typeof permission.metadata?.parentDir === 'string') {
+    candidates.push(permission.metadata.parentDir);
+  }
+  for (const seg of permission.description.split(',')) {
+    const t = seg.trim();
+    if (t) candidates.push(t);
+  }
+  // pattern 形如 .../prompts/docs/*：`*` 视为任意子路径。
+  // 只要任一白名单文档位于任一允许目录下即命中（方向是"文档 ∈ 允许目录"）。
+  return allowlist.some((doc) =>
+    candidates.some((raw) => {
+      const p = normalizePath(raw);
+      const dir = p.endsWith('/*') ? p.slice(0, -2) : p;
+      return doc === dir || doc.startsWith(dir + '/');
+    }),
+  );
+}
+
+/**
+ * 自动放行白名单文档读取（异步，由事件循环调用）：
+ * 成功回复 OpenCode once 并返回 true（外层广播 auto_granted 供前端提示）；
+ * 失败转人工确认（广播 permission.asked）并返回 false。
+ * sessionId 必须取事件流中的真实会话（审核会话与主会话不同）。
+ */
+async function autoGrantDocsRead(
+  draftId: string,
+  sessionId: string,
+  permission: PermissionRequest,
+): Promise<boolean> {
+  if (!sessionId || !permission.id) return false;
+  try {
+    await opencode.getClient().postSessionIdPermissionsPermissionId({
+      path: { id: sessionId, permissionID: permission.id },
+      body: { response: 'once' },
+      query: { directory: draftWorkspace(draftId) },
+    });
+    logger.info('permission', '自动放行白名单文档读取', {
+      draft_id: draftId,
+      permission_id: permission.id,
+      description: permission.description,
+    });
+    return true;
+  } catch (e) {
+    logger.warn('permission', '白名单文档读取自动放行失败，转人工确认', {
+      draft_id: draftId,
+      error: (e as Error).message,
+    });
+    broadcast({ type: 'permission.asked', draft_id: draftId, permission });
+    return false;
+  }
+}
+
+/**
+ * 把 opencode 的 PermissionV1.Request（permission.asked 事件 properties / /permission 列表项）
+ * 归一化为平台 PermissionRequest。
+ * 注意：`permission` 字段就是工具名（bash / edit / read / external_directory…），
+ * `tool` 是 { messageID, callID } 调用位置对象，不能当工具名用。
+ */
+export function toPermissionRequest(p: Record<string, unknown>): PermissionRequest {
+  const patterns = Array.isArray(p.patterns) ? (p.patterns as unknown[]).map(String) : [];
+  const metadata = (p.metadata as Record<string, unknown>) ?? {};
+  const tool = p.tool as { messageID?: string; callID?: string } | undefined;
+  const description =
+    patterns.join(', ') ||
+    String(metadata.filepath ?? metadata.parentDir ?? p.pattern ?? '');
+  return {
+    id: String(p.id ?? ''),
+    session_id: String(p.sessionID ?? ''),
+    permission: String(p.permission ?? p.type ?? ''),
+    tool_name: String(p.permission ?? p.type ?? ''),
+    description,
+    metadata: {
+      ...metadata,
+      ...(tool?.messageID && tool.callID ? { tool } : {}),
+    },
+  };
 }
 
 /** 归一化 OpenCode 事件（过滤到与草稿相关的部分） */
@@ -93,28 +198,20 @@ function normalize(raw: Record<string, unknown>): StudioEvent | null {
     case 'permission.asked':
     case 'permission.updated': {
       // opencode 1.18.4 实际事件类型为 permission.asked（SDK 类型文件仍写 permission.updated），
-      // properties 直接就是 Permission 对象：{ id, sessionID, permission, patterns[], metadata }
-      const p = props as Record<string, unknown>;
-      const patterns = Array.isArray(p.patterns) ? (p.patterns as unknown[]).map(String) : [];
-      const metadata = (p.metadata as Record<string, unknown>) ?? {};
-      const description =
-        patterns.join(', ') ||
-        String(metadata.filepath ?? metadata.parentDir ?? p.pattern ?? '');
-      const permission: PermissionRequest = {
-        id: String(p.id ?? ''),
-        session_id: String(p.sessionID ?? ''),
-        permission: String(p.permission ?? p.type ?? ''),
-        tool_name: String(p.tool ?? p.permission ?? p.type ?? ''),
-        description,
-        metadata,
-      };
+      // properties 直接就是 PermissionV1.Request：{ id, sessionID, permission, patterns[], metadata, always, tool }
+      const permission = toPermissionRequest(props);
+      // 白名单文档读取自动放行（不弹权限框）
+      if (matchesDocsAllowlist(permission)) {
+        return { ...base, type: 'permission.auto_granted', permission };
+      }
       return { ...base, type: 'permission.asked', permission };
     }
     case 'permission.replied':
+      // schema 字段为 requestID（不是 permissionID）
       return {
         ...base,
         type: 'permission.replied',
-        permission_id: String(props.permissionID ?? ''),
+        permission_id: String(props.requestID ?? ''),
       };
     case 'question.asked': {
       // opencode 1.18 实际事件类型为 question.asked（SDK 1.18 未生成对应类型），
@@ -337,6 +434,11 @@ async function subscribeWorkspace(workspace: string) {
           const ev = normalize(raw);
           if (!ev) return;
           logger.debug('events', `收到事件 ${ev.type}`, { draft_id: draftId });
+          // 白名单文档读取：自动回复 OpenCode 放行；成功才广播 auto_granted，失败转人工
+          if (ev.type === 'permission.auto_granted') {
+            const granted = await autoGrantDocsRead(draftId, sessionId, ev.permission);
+            if (!granted) return;
+          }
           await settleSessionState(draftId, sessionId, ev);
           broadcast({ ...ev, draft_id: draftId });
         },

@@ -128,6 +128,19 @@ export const useStudioStore = defineStore('studio', () => {
     })
   }
 
+  /**
+   * 拉取待处理权限（SSE 事件丢失/断线重连后的兜底：opencode 的 pending 权限
+   * 在进程内存里，只要 opencode 未重启就能从这里恢复并补出弹窗）。
+   */
+  async function fetchPendingPermissions(id) {
+    try {
+      const perms = await api(`/drafts/${id}/permissions`)
+      for (const p of perms) pushPendingPermission(p)
+    } catch {
+      // OpenCode 不可用时忽略
+    }
+  }
+
   /** 回答 AI 提问：answers 为每个问题的回答数组（元素为选项 label 或自定义文本） */
   async function replyQuestion(id, questionId, answers) {
     await api(`/drafts/${id}/questions/${questionId}`, {
@@ -170,6 +183,7 @@ export const useStudioStore = defineStore('studio', () => {
       fetchDiff(id),
       fetchTodo(id),
       fetchFiles(id),
+      fetchPendingPermissions(id),
     ])
     resetPending()
   }
@@ -241,6 +255,7 @@ export const useStudioStore = defineStore('studio', () => {
     replyPermission,
     replyQuestion,
     rejectQuestion,
+    fetchPendingPermissions,
     refreshCurrent,
     refreshMessages,
     restoreAfterReconnect,

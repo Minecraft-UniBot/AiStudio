@@ -6,7 +6,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { ensureDataDirs, saveConfig } from './config';
+import { ensureDataDirs, saveConfig, docsAllowlist } from './config';
 import { config } from './config';
 import { opencode } from './opencode';
 import { logger } from './logger';
@@ -36,7 +36,7 @@ import {
 import { maybeReviewAfterValidation, settleReview, startReview } from './review';
 import { startDebugging } from './debugging';
 import { publishDraft, PublishError } from './publishing';
-import { broadcast, registerSocket, startEventConsumer, unregisterSocket } from './events';
+import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './events';
 import { getTools, updateTools } from './tools';
 import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './prompts';
 import { assertFeatureEnabled } from './registry';
@@ -250,12 +250,16 @@ async function handleRequest(req: Request): Promise<Response> {
       });
 
       // 提示词模板化（Plan 7.1）：scaffold + system 均从 prompts/*.md 渲染，
-      // 安全约束由后端追加（路径白名单、密钥禁止读取），不进入可编辑模板
+      // 安全约束由后端追加（路径白名单、密钥禁止读取、本地文档白名单、联网禁令），不进入可编辑模板
+      const docs = docsAllowlist();
       const security = [
         `1. 只能操作草稿工作区：${workspace}（目录之外的一切内容禁止读取或修改）。`,
-        '2. 禁止读取 .env、凭据、密钥类文件及 UniBot 核心代码、配置、用户数据。',
-        '3. 涉及 shell 命令和网络访问时，先说明目的并等待用户确认。',
-        '4. 扩展目录名与 Extension.toml 的 extension.id 必须完全一致（含大小写）。',
+        `2. 本地文档只读白名单（仅可读取，禁止修改）：\n${docs}`,
+        '3. 禁止读取 .env、凭据、密钥类文件及 UniBot 核心代码、配置、用户数据。',
+        '4. 禁止使用 web_fetch / web_search 联网搜索本项目（UniBot、扩展开发等）内容；' +
+          '仅当本地文档确无答案时允许查询第三方库（nonebot2 / alconna / pydantic 等）官方文档，且需先说明目的并等待用户确认。',
+        '5. 涉及 shell 命令和网络访问时，先说明目的并等待用户确认。',
+        '6. 扩展目录名与 Extension.toml 的 extension.id 必须完全一致（含大小写）。',
       ].join('\n');
       const system = renderPromptWithSecurity('system', {
         allowlist: workspace,
@@ -510,6 +514,22 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
+  // ---- 待处理权限列表（SSE 事件丢失/断线重连后的兜底补推） ----
+  const permListMatch = path.match(/^\/api\/studio\/drafts\/([^/]+)\/permissions$/);
+  if (permListMatch && req.method === 'GET') {
+    const draftId = permListMatch[1]!;
+    const draft = readDraft(draftId);
+    try {
+      const pending = await opencode.listPendingPermissions(draftWorkspace(draftId));
+      const mine = pending.filter(
+        (p) => p.sessionID === draft.session_id || p.sessionID === draft.review_session_id,
+      );
+      return json(mine.map((p) => toPermissionRequest(p)));
+    } catch (e) {
+      return errorJson(`获取待处理权限失败：${(e as Error).message}`, 1, 503);
+    }
+  }
+
   // ---- 权限回复 ----
   const permMatch = path.match(/^\/api\/studio\/drafts\/([^/]+)\/permissions\/([^/]+)$/);
   if (permMatch && req.method === 'POST') {
@@ -521,13 +541,19 @@ async function handleRequest(req: Request): Promise<Response> {
       return errorJson('response 必须是 once / always / reject');
     }
     try {
-      // 后端二次约束：bash 的 always 降级为 once（Plan.md 8.1）
-      const decision = response === 'always' ? 'once' : response;
+      // 安全约束（Plan 8.1）：bash 等危险命令的 always 降级为 once；
+      // 其余工具（read / edit / todowrite…）尊重 always——真正"本草稿始终允许"。
+      let decision = response;
+      if (response === 'always') {
+        const pending = await opencode.listPendingPermissions(draftWorkspace(draftId!));
+        const tool = String(pending.find((p) => p.id === permissionId)?.permission ?? '');
+        if (tool === 'bash') decision = 'once';
+      }
       await opencode
         .getClient()
         .postSessionIdPermissionsPermissionId({
           path: { id: draft.session_id!, permissionID: permissionId! },
-          body: { response: decision as 'once' | 'reject' },
+          body: { response: decision as 'once' | 'always' | 'reject' },
           query: { directory: draftWorkspace(draftId!) },
         });
       broadcast({ type: 'permission.replied', draft_id: draftId!, permission_id: permissionId! });

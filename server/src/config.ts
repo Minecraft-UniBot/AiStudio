@@ -108,6 +108,34 @@ export function saveConfig(patch: Partial<StudioConfig>): StudioConfig {
 
 export const config: StudioConfig = loadConfig();
 
+/**
+ * 本地文档只读白名单（注入到 OpenCode 会话的安全约束）。
+ *
+ * 文档以副本形式存放在 Studio 内（server/prompts/docs/，由仓库脚本从
+ * UniBot/Docs 与 UniBot/AGENT.md 同步），不依赖 unibot_dir 的绝对路径，
+ * 避免 AI 因「目录外禁止读取」而去 web_fetch 搜索本项目内容。
+ * 路径基于本文件位置解析（import.meta.dir -> server/prompts/docs），仅可读取、禁止修改。
+ */
+
+/** 文档白名单绝对路径数组（供安全约束文本与权限自动放行共用） */
+export function docsAllowlistPaths(): string[] {
+  const docsDir = join(import.meta.dir, '..', 'prompts', 'docs');
+  const files = [
+    '开发插件.md',
+    '扩展系统.md',
+    '配置说明.md',
+    '上传市场.md',
+    '接口文档.md',
+    '编码规范.md',
+  ];
+  return files.map((f) => join(docsDir, f));
+}
+
+/** 文档白名单格式化文本（注入到 OpenCode 会话的安全约束） */
+export function docsAllowlist(): string {
+  return docsAllowlistPaths().map((p) => `  - ${p}`).join('\n');
+}
+
 /** 初始化平台数据目录结构 */
 export function ensureDataDirs() {
   for (const dir of [

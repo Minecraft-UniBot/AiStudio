@@ -50,6 +50,11 @@ function tool_open(part, idx) {
   return expanded_tools.value.has(tool_key(part, idx))
 }
 
+/** read / write / webfetch 工具调用不展示内容预览（文件/网页内容占屏且无必要） */
+function compact_tool(part) {
+  return part.name === 'read' || part.name === 'write' || part.name === 'webfetch'
+}
+
 function toggle_tool(part, idx) {
   const key = tool_key(part, idx)
   const next = new Set(expanded_tools.value)
@@ -195,7 +200,9 @@ function todo_priority_class(priority) {
                 <Icon v-else-if="tool_status(part) === 'fail'" icon="lucide:x" width="12" />
                 <Icon v-else icon="lucide:clock" width="12" />
               </span>
+              <!-- 无可展开内容（read/write/webfetch）时不显示箭头 -->
               <Icon
+                v-if="!compact_tool(part)"
                 icon="lucide:chevron-down"
                 width="12"
                 class="tool-chevron"
@@ -226,31 +233,46 @@ function todo_priority_class(priority) {
                 </span>
               </div>
             </div>
-            <!-- AI 提问（question）：结构化问题卡片 -->
+            <!-- AI 提问（question）：未回答显示选项；已回答直接显示用户回答（含自定义） -->
             <div v-else-if="part.questions?.length" class="question-cards">
-              <div v-for="q in part.questions" :key="q.question" class="question-card">
-                <div class="q-head">
-                  <Icon icon="lucide:help-circle" width="14" class="q-icon" />
-                  <span class="q-header">{{ q.header || 'AI 提问' }}</span>
-                </div>
-                <p class="q-text">{{ q.question }}</p>
-                <div v-if="q.options?.length" class="q-options">
-                  <div v-for="opt in q.options" :key="opt.label" class="q-option">
-                    <span class="q-option-label">{{ opt.label }}</span>
-                    <span v-if="opt.description" class="q-option-desc">{{ opt.description }}</span>
+              <template v-if="part.answers?.length">
+                <div v-for="(q, qi) in part.questions" :key="q.question" class="question-card answered">
+                  <div class="q-head">
+                    <Icon icon="lucide:help-circle" width="14" class="q-icon" />
+                    <span class="q-header">{{ q.header || 'AI 提问' }}</span>
+                  </div>
+                  <p class="q-text">{{ q.question }}</p>
+                  <div class="q-answer">
+                    <Icon icon="lucide:message-circle" width="13" class="q-answer-icon" />
+                    <span class="q-answer-text">{{ (part.answers[qi] ?? []).join('、') || '未回答' }}</span>
                   </div>
                 </div>
-              </div>
+              </template>
+              <template v-else>
+                <div v-for="q in part.questions" :key="q.question" class="question-card">
+                  <div class="q-head">
+                    <Icon icon="lucide:help-circle" width="14" class="q-icon" />
+                    <span class="q-header">{{ q.header || 'AI 提问' }}</span>
+                  </div>
+                  <p class="q-text">{{ q.question }}</p>
+                  <div v-if="q.options?.length" class="q-options">
+                    <div v-for="opt in q.options" :key="opt.label" class="q-option">
+                      <span class="q-option-label">{{ opt.label }}</span>
+                      <span v-if="opt.description" class="q-option-desc">{{ opt.description }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
             </div>
-            <!-- 文件内容预览（read/edit）：等宽展示，不带 JSON 包装；默认收起，点击头部展开 -->
+            <!-- 文件内容预览（read/write 不展示，仅 read/edit 有内容且需展开查看） -->
             <pre
-              v-else-if="tool_open(part, idx) && part.file_content"
+              v-else-if="!compact_tool(part) && tool_open(part, idx) && part.file_content"
               class="tool-output file-preview"
               :class="{ error: tool_status(part) === 'fail' }"
             >{{ part.file_content }}</pre>
-            <!-- 结果输出 -->
+            <!-- 结果输出（read/write 不展示） -->
             <pre
-              v-else-if="tool_open(part, idx) && tool_result(part)"
+              v-else-if="!compact_tool(part) && tool_open(part, idx) && tool_result(part)"
               class="tool-output"
               :class="{ error: tool_status(part) === 'fail' }"
             >{{ tool_result(part) }}</pre>
@@ -841,6 +863,32 @@ function todo_priority_class(priority) {
   font-size: var(--text-xs);
   color: var(--text);
   font-weight: 500;
+}
+
+/* 已回答的提问：直接展示用户回答（含自定义答案），不再显示选项 */
+.question-card.answered {
+  border-color: var(--success);
+}
+
+.q-answer {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.q-answer-icon {
+  color: var(--success);
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 .q-option-desc {

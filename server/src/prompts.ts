@@ -56,12 +56,17 @@ function persistHistory(history: PromptHistory): void {
 }
 
 /** 解析模板源文件的 front-matter（--- name/version --- + 正文） */
-function parseBuiltin(content: string): { name: string; body: string } {
+function parseBuiltin(content: string): { name: string; version: number; body: string } {
   const m = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!m) return { name: '', body: content };
+  if (!m) return { name: '', version: 1, body: content };
   const meta = m[1] ?? '';
   const nameMatch = meta.match(/^name:\s*(.+)$/m);
-  return { name: (nameMatch?.[1] ?? '').trim(), body: (m[2] ?? '').trim() };
+  const versionMatch = meta.match(/^version:\s*(\d+)$/m);
+  return {
+    name: (nameMatch?.[1] ?? '').trim(),
+    version: versionMatch ? Number(versionMatch[1]) : 1,
+    body: (m[2] ?? '').trim(),
+  };
 }
 
 function listBuiltinNames(): string[] {
@@ -78,9 +83,9 @@ function readBuiltin(name: string): string {
 /** 默认初始版本内容（内置模板源文件） */
 function builtinVersion(name: string): PromptVersion {
   const raw = readBuiltin(name);
-  const { body } = parseBuiltin(raw);
+  const { body, version } = parseBuiltin(raw);
   return {
-    version: 1,
+    version,
     content: body,
     created_at: new Date(0).toISOString(), // 内置模板视为最早版本
     activated_at: new Date(0).toISOString(),

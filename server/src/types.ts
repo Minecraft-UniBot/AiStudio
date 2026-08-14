@@ -138,6 +138,7 @@ export type StudioEvent =
   | { type: 'todo.updated'; draft_id: string; todo: unknown }
   | { type: 'permission.asked'; draft_id: string; permission: PermissionRequest }
   | { type: 'permission.replied'; draft_id: string; permission_id: string }
+  | { type: 'permission.auto_granted'; draft_id: string; permission: PermissionRequest }
   | { type: 'question.asked'; draft_id: string; question: QuestionRequest }
   | { type: 'question.replied'; draft_id: string; question_id: string }
   | { type: 'question.rejected'; draft_id: string; question_id: string }
