@@ -54,7 +54,7 @@ export async function startReview(draftId: string): Promise<ReviewResult> {
 
   // 创建独立审核会话（与生成/调试会话隔离）
   const created = await client.session.create({
-    body: { title: `审核：${draft.extension_id}`, parentID: undefined },
+    body: { title: `审核：${draft.extension_id}` },
     query: { directory: workspace },
   });
   const sessionId = created.data?.id;

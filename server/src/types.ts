@@ -112,6 +112,12 @@ export interface DraftMeta {
   validation: ValidationRun | null;
   /** 最近一次通过检查的文件摘要（SHA-256） */
   validation_revision: string | null;
+  /**
+   * 最近一次回退的目标消息 ID（OpenCode revert 是「暂存式」：文件立即恢复，
+   * 对话消息要等下一次 prompt 才物理删除）。消息列表按此 ID 过滤，
+   * 让前端立即呈现回退后的对话；发送新消息时清除。
+   */
+  revert_message_id?: string | null;
   created_at: string;
   updated_at: string;
   published_at: string | null;

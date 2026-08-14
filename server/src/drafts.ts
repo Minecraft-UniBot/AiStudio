@@ -7,6 +7,7 @@
  * - 扩展 ID 为 PascalCase，创建后不可修改
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -22,6 +23,7 @@ import {
 import { join, relative, resolve, sep } from 'node:path';
 import { config } from './config';
 import { assertDiskSpace } from './disk';
+import { logger } from './logger';
 import type { DraftMeta, ExtensionType } from './types';
 
 const MANIFEST_SCAFFOLD = `[manifest]
@@ -89,6 +91,45 @@ export function draftDir(draftId: string): string {
 /** 草稿工作区（AI 可操作的最上层目录） */
 export function draftWorkspace(draftId: string): string {
   return join(draftDir(draftId), 'workspace');
+}
+
+/**
+ * 确保草稿工作区是 git 仓库。
+ *
+ * OpenCode 的「回退」（session.revert）依赖其快照机制恢复文件，
+ * 而快照仅在项目被识别为 git 项目时启用（snapshot enabled ⇔ vcs === "git"）。
+ * 草稿工作区位于平台数据目录（~/.unibot-studio/drafts/…），默认不是 git 仓库，
+ * 不初始化的话 revert 只会静默「暂存」而不会恢复任何文件——这正是 revert 失效的原因。
+ *
+ * 幂等：已存在 .git 直接返回 true；git 不可用时返回 false（revert 退化为仅清理对话）。
+ */
+export function ensureGitWorkspace(draftId: string): boolean {
+  const workspace = draftWorkspace(draftId);
+  if (!existsSync(workspace)) return false;
+  if (existsSync(join(workspace, '.git'))) return true;
+  try {
+    const res = spawnSync('git', ['init', '-q'], { cwd: workspace, stdio: 'ignore', timeout: 15_000 });
+    const ok = res.status === 0;
+    if (ok) {
+      logger.info('draft', '已初始化草稿工作区 git 仓库（启用 OpenCode 快照/回退）', {
+        draft_id: draftId,
+        workspace,
+      });
+    } else {
+      logger.warn('draft', 'git init 失败，回退功能将不可用', {
+        draft_id: draftId,
+        status: res.status,
+        error: res.error?.message,
+      });
+    }
+    return ok;
+  } catch (e) {
+    logger.warn('draft', 'git init 异常，回退功能将不可用', {
+      draft_id: draftId,
+      error: (e as Error).message,
+    });
+    return false;
+  }
 }
 
 export function draftMetaPath(draftId: string): string {
@@ -170,6 +211,9 @@ export function createDraft(input: {
     TEST_SCAFFOLD.replaceAll('{{name}}', input.name),
     'utf-8',
   );
+
+  // 初始化 git 仓库：OpenCode 快照/回退依赖 git 项目检测（见 ensureGitWorkspace）
+  ensureGitWorkspace(draftId);
 
   const meta: DraftMeta = {
     schema_version: 1,

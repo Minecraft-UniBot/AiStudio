@@ -15,7 +15,7 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['send', 'stop', 'reply-permission', 'reply-question'])
+const emit = defineEmits(['send', 'stop', 'reply-permission', 'reply-question', 'revert-message'])
 
 const input = ref('')
 const sending = ref(false)
@@ -87,7 +87,12 @@ function replyQuestion(question, answer) {
         <Icon icon="lucide:sparkles" width="26" />
         <p>AI 正在基于你的描述创建扩展…</p>
       </div>
-      <MessagePart v-for="msg in messages" :key="msg.info?.id" :message="msg" />
+      <MessagePart
+        v-for="msg in messages"
+        :key="msg.info?.id"
+        :message="msg"
+        @revert="(messageId) => emit('revert-message', messageId)"
+      />
       <div ref="messageEl" />
     </div>
 

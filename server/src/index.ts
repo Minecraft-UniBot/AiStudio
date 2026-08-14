@@ -18,6 +18,7 @@ import {
   deleteDraft,
   DraftError,
   draftWorkspace,
+  ensureGitWorkspace,
   listDrafts,
   listFiles,
   readDraft,
@@ -227,11 +228,10 @@ async function handleRequest(req: Request): Promise<Response> {
       // 创建 OpenCode session 并发送第一条实现请求
       const client = opencode.getClient();
       const workspace = draftWorkspace(draft.id);
+      // 旧版草稿可能没有 git 仓库：补齐后再建会话（回退功能依赖，见 ensureGitWorkspace）
+      ensureGitWorkspace(draft.id);
       const created = await client.session.create({
-        body: {
-          title: draft.name,
-          parentID: undefined,
-        },
+        body: { title: draft.name },
         query: { directory: workspace },
       });
       const sessionId = created.data?.id;
@@ -322,7 +322,14 @@ async function handleRequest(req: Request): Promise<Response> {
               path: { id: draft.session_id },
               query: { directory: workspace },
             });
-            return json(res.data ?? []);
+            let list = res.data ?? [];
+            // OpenCode revert 是暂存式：文件已恢复，但被回退的消息要等下一次 prompt
+            // 才物理删除。按草稿记录的 revert_message_id 过滤，让前端立即看到回退结果
+            //（消息 ID 为 ULID，字典序即时间序，与 opencode cleanup 的判定一致：>= 目标即删除）。
+            if (draft.revert_message_id) {
+              list = list.filter((m) => !m.info || m.info.id < draft.revert_message_id!);
+            }
+            return json(list);
           }
           if (req.method === 'POST') {
             assertPromptable(draft);
@@ -334,7 +341,12 @@ async function handleRequest(req: Request): Promise<Response> {
               body: { parts: [{ type: 'text', text: body.text }] },
               query: { directory: workspace },
             });
-            updateDraft(draftId, { status: 'generating' });
+            // 新消息会触发 opencode 的 revert cleanup（物理删除被回退的消息），
+            // 因此清除暂存过滤标记，避免把新消息也过滤掉。
+            updateDraft(draftId, {
+              status: 'generating',
+              ...(draft.revert_message_id ? { revert_message_id: null } : {}),
+            });
             logger.info('draft', '发送新消息', {
               draft_id: draftId,
               extension_id: draft.extension_id,
@@ -349,6 +361,49 @@ async function handleRequest(req: Request): Promise<Response> {
             await client.session.abort({ path: { id: draft.session_id }, query: { directory: workspace } });
             updateDraft(draftId, { status: 'draft' });
             logger.info('draft', '停止生成', { draft_id: draftId, extension_id: draft.extension_id });
+            return json({ ok: true });
+          }
+          break;
+        }
+        case 'revert': {
+          // 回退到某条用户消息之前：OpenCode 原生 revert（恢复文件状态 + 对话记录），
+          // 之后旧校验/审核结果一律失效，草稿回到 draft 状态等待重新生成。
+          if (req.method === 'POST' && draft.session_id) {
+            if (['generating', 'repairing', 'debugging', 'checking', 'reviewing'].includes(draft.status)) {
+              return errorJson('当前正在生成/校验/审核中，请先停止或等待完成后再回退', 1, 409);
+            }
+            const body = (await req.json()) as { message_id?: string };
+            if (!body.message_id) return errorJson('缺少 message_id');
+            // 旧版草稿可能没有 git 仓库：补齐后再回退（OpenCode 快照恢复文件依赖 git，
+            // 否则 revert 只暂存对话而不恢复文件——即此前 revert 失效的原因）。
+            ensureGitWorkspace(draftId);
+            const res = await client.session.revert({
+              path: { id: draft.session_id },
+              body: { messageID: body.message_id },
+              query: { directory: workspace },
+            });
+            // 校验 revert 真正生效：opencode 找不到目标消息时返回未变更的 Session（无 revert 字段），
+            // 不能当成成功处理（SDK throwOnError 只覆盖 4xx/5xx，不覆盖这种静默 no-op）。
+            const staged = res.data?.revert;
+            if (!staged || staged.messageID !== body.message_id) {
+              return errorJson('回退未生效：目标消息不存在或会话状态异常，请刷新后重试', 1, 400);
+            }
+            // 文件已恢复、对话待物理清理：重置校验/审核/摘要并记录回退点，锁定一键发布
+            updateDraft(draftId, {
+              status: 'draft',
+              validation: null,
+              validation_revision: null,
+              review: null,
+              revert_message_id: body.message_id,
+              error: undefined,
+            });
+            broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+            logger.info('draft', '回退消息', {
+              draft_id: draftId,
+              extension_id: draft.extension_id,
+              message_id: body.message_id,
+              revert_staged: staged.messageID,
+            });
             return json({ ok: true });
           }
           break;
@@ -430,7 +485,10 @@ async function handleRequest(req: Request): Promise<Response> {
       }
     } catch (e) {
       if (e instanceof DraftError) return errorJson(e.message, 404, 404);
-      const status = (e as Error & { status?: number }).status;
+      // SDK throwOnError 抛出的 Error 把原始状态码放在 cause.status（见 opencode.ts 文件头）
+      const status =
+        (e as Error & { status?: number }).status ??
+        (e as Error & { cause?: { status?: number } }).cause?.status;
       if (status) return errorJson((e as Error).message, 1, status);
       return errorJson((e as Error).message, 1, 400);
     }
@@ -462,17 +520,21 @@ async function handleRequest(req: Request): Promise<Response> {
     if (!response || !['once', 'always', 'reject'].includes(response)) {
       return errorJson('response 必须是 once / always / reject');
     }
-    // 后端二次约束：bash 的 always 降级为 once（Plan.md 8.1）
-    const decision = response === 'always' ? 'once' : response;
-    await opencode
-      .getClient()
-      .postSessionIdPermissionsPermissionId({
-        path: { id: draft.session_id!, permissionID: permissionId! },
-        body: { response: decision as 'once' | 'reject' },
-        query: { directory: draftWorkspace(draftId!) },
-      });
-    broadcast({ type: 'permission.replied', draft_id: draftId!, permission_id: permissionId! });
-    return json({ ok: true });
+    try {
+      // 后端二次约束：bash 的 always 降级为 once（Plan.md 8.1）
+      const decision = response === 'always' ? 'once' : response;
+      await opencode
+        .getClient()
+        .postSessionIdPermissionsPermissionId({
+          path: { id: draft.session_id!, permissionID: permissionId! },
+          body: { response: decision as 'once' | 'reject' },
+          query: { directory: draftWorkspace(draftId!) },
+        });
+      broadcast({ type: 'permission.replied', draft_id: draftId!, permission_id: permissionId! });
+      return json({ ok: true });
+    } catch (e) {
+      return errorJson(`权限回复失败：${(e as Error).message}`, 1, 400);
+    }
   }
 
   // ---- 问题回复（通过发送回复消息应答） ----
@@ -482,12 +544,16 @@ async function handleRequest(req: Request): Promise<Response> {
     const draft = readDraft(draftId!);
     const body = (await req.json()) as { answer?: string };
     if (!body.answer) return errorJson('answer 不能为空');
-    await opencode.getClient().session.prompt({
-      path: { id: draft.session_id! },
-      body: { parts: [{ type: 'text', text: body.answer }], noReply: true },
-      query: { directory: draftWorkspace(draftId!) },
-    });
-    return json({ ok: true });
+    try {
+      await opencode.getClient().session.prompt({
+        path: { id: draft.session_id! },
+        body: { parts: [{ type: 'text', text: body.answer }], noReply: true },
+        query: { directory: draftWorkspace(draftId!) },
+      });
+      return json({ ok: true });
+    } catch (e) {
+      return errorJson(`回复失败：${(e as Error).message}`, 1, 400);
+    }
   }
 
   // ---- 平台设置 ----
@@ -562,8 +628,10 @@ async function ensureSession(
   client: ReturnType<typeof opencode.getClient>,
   workspace: string,
 ): Promise<string> {
+  // 旧版草稿可能没有 git 仓库：补齐后再建会话（回退功能依赖，见 ensureGitWorkspace）
+  ensureGitWorkspace(draft.id);
   const created = await client.session.create({
-    body: { title: draft.name, parentID: undefined },
+    body: { title: draft.name },
     query: { directory: workspace },
   });
   const sessionId = created.data?.id;

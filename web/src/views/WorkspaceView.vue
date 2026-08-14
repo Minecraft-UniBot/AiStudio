@@ -12,6 +12,7 @@ import DraftFileTree from '@/components/studio/DraftFileTree.vue'
 import ResultSummary from '@/components/studio/ResultSummary.vue'
 import ValidationPanel from '@/components/studio/ValidationPanel.vue'
 import PublishDialog from '@/components/studio/PublishDialog.vue'
+import Dialog from '@/components/ui/Dialog.vue'
 import ResizablePanel from '@/components/ui/ResizablePanel.vue'
 import Button from '@/components/ui/Button.vue'
 import FileViewer from '@/components/studio/FileViewer.vue'
@@ -36,6 +37,10 @@ const reviewing = ref(false)
 const repairing = ref(false)
 const publishing = ref(false)
 const publishOpen = ref(false)
+/** 回退确认对话框状态 */
+const reverting = ref(false)
+const revertTarget = ref('')
+const revertOpen = ref(false)
 /** 本地摘要过期标记：发送消息后置 true，校验通过后清除（Plan 12.2） */
 const revisionDirty = ref(false)
 
@@ -144,7 +149,8 @@ async function refreshAll() {
 }
 
 watch(
-  () => store.currentDraft?.value?.validation_revision,
+  // store.currentDraft 已被 Pinia 自动解包为草稿对象，不能访问 .value
+  () => store.currentDraft?.validation_revision,
   (revision) => {
     // 后端摘要变化（校验通过）时清除本地过期标记
     if (revision) revisionDirty.value = false
@@ -249,6 +255,35 @@ function expandRight() {
   rightCollapsed.value = false
 }
 
+// ===== 回退到某条消息之前（Plan 3.3：恢复文件状态与对话记录） =====
+function requestRevert(messageId) {
+  revertTarget.value = messageId
+  revertOpen.value = true
+}
+
+async function confirmRevert() {
+  if (!revertTarget.value) return
+  reverting.value = true
+  try {
+    await store.revertToMessage(draftId, revertTarget.value)
+    revertOpen.value = false
+    toast_success('已回退到该消息之前，文件与对话记录已恢复')
+    revisionDirty.value = true
+    // 刷新草稿、消息、文件、diff、待办
+    await Promise.all([
+      store.fetchDraft(draftId),
+      store.fetchMessages(draftId),
+      store.fetchDiff(draftId),
+      store.fetchTodo(draftId),
+    ])
+    await loadFiles()
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    reverting.value = false
+  }
+}
+
 onMounted(async () => {
   await refreshAll()
 })
@@ -316,6 +351,7 @@ onMounted(async () => {
         @stop="stop"
         @reply-permission="replyPermission"
         @reply-question="replyQuestion"
+        @revert-message="requestRevert"
       />
 
       <!-- 右栏：结果 / 检查 / 设置（可拖拽/折叠） -->
@@ -404,6 +440,17 @@ onMounted(async () => {
       :draft="draft"
       :publishing="publishing"
       @confirm="confirmPublish"
+    />
+
+    <!-- 回退确认：恢复文件状态和对话记录到该消息之前 -->
+    <Dialog
+      v-model="revertOpen"
+      title="回退到该消息之前？"
+      description="将撤销这条消息及其后的所有改动，恢复文件状态和对话记录；旧校验与审核结果会失效，需要重新生成与检查。"
+      confirm-text="确认回退"
+      confirm-variant="danger"
+      :loading="reverting"
+      @confirm="confirmRevert"
     />
 
     <!-- 大尺寸文件查看器 -->

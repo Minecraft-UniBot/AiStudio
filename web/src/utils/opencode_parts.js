@@ -43,17 +43,45 @@ export function normalize_part(part) {
 /** 归一化工具调用 part → 稳定的扁平视图模型 */
 export function normalize_tool(part) {
   const state = part.state ?? {}
-  return {
+  const input = state.input ?? {}
+  const base = {
     type: 'tool',
     id: String(part.id ?? part.callID ?? ''),
     name: String(part.tool ?? ''),
     status: String(state.status ?? 'pending'),
     title: String(state.title ?? ''),
-    input: state.input ?? {},
+    input,
     label: tool_label(part),
     output: stringify(state.output),
     error: stringify(state.error),
   }
+  // todowrite：把 input.todos 结构化为待办清单视图模型
+  if (base.name === 'todowrite' && Array.isArray(input.todos)) {
+    base.todos = input.todos.map((t) => ({
+      content: String(t?.content ?? ''),
+      status: String(t?.status ?? 'pending'),
+      priority: String(t?.priority ?? 'medium'),
+    }))
+  }
+  // question：AI 提问工具（向用户确认），结构化为问题卡片
+  if (base.name === 'question' && Array.isArray(input.questions)) {
+    base.questions = input.questions.map((q) => ({
+      header: String(q?.header ?? ''),
+      question: String(q?.question ?? ''),
+      options: Array.isArray(q?.options)
+        ? q.options.map((o) => ({
+            label: String(o?.label ?? ''),
+            description: String(o?.description ?? ''),
+          }))
+        : [],
+    }))
+  }
+  // read：从 output 的 XML 包装 <content>…</content> 中提取文件内容（去掉路径/类型标签）
+  if (base.name === 'read') {
+    const m = String(base.output ?? '').match(/<content>([\s\S]*?)<\/content>/)
+    if (m && m[1].trim()) base.file_content = m[1].trim()
+  }
+  return base
 }
 
 /** 从 tool state 提取展示状态：ok / fail / wait / run（兼容归一化前后两种结构） */
@@ -69,11 +97,17 @@ export function tool_status(part) {
 export function tool_label(part) {
   const name = part?.name ?? part?.tool ?? ''
   const input = part?.input ?? part?.state?.input ?? {}
+  if (name === 'todowrite') return '更新任务清单'
+  if (name === 'question') return '向你提问'
+  if (name === 'read' || name === 'edit') {
+    const file = filePathOf(input)
+    if (file) return `${name} ${basename(file)}`
+  }
   if (typeof input !== 'object' || input === null) {
     return name || '工具'
   }
-  const file = input.file_path ?? input.path
-  if (file) return `${name} ${file}`
+  const file = filePathOf(input)
+  if (file) return `${name} ${basename(file)}`
   const cmd = input.command
   if (cmd) return `${name} ${cmd}`
   const query = input.query
@@ -84,8 +118,31 @@ export function tool_label(part) {
   return name || '工具'
 }
 
+/** 兼容 read/edit 工具的路径字段命名：file_path / path / filePath */
+function filePathOf(input) {
+  return input?.file_path ?? input?.path ?? input?.filePath
+}
+
+/** 取路径最后一段（read/edit 的标签避免长路径刷屏） */
+function basename(path) {
+  const cleaned = String(path).replace(/\/+$/, '')
+  const seg = cleaned.split('/').pop()
+  return seg || cleaned
+}
+
 /** 工具执行结果正文（completed → output，error → error；兼容归一化前后两种结构） */
 export function tool_result(part) {
+  // read：从 output 的 XML 包装 <content>…</content> 中提取文件内容（去掉路径/类型标签）
+  if (part?.name === 'read' && typeof part?.output === 'string') {
+    const m = part.output.match(/<content>([\s\S]*?)<\/content>/)
+    if (m && m[1].trim()) return m[1].trim()
+  }
+  // read/edit：优先展示 input.content（文件内容预览，比原始 output 更可读）
+  if (part?.file_content) return part.file_content
+  const raw_input = part?.input ?? part?.state?.input
+  if (raw_input && typeof raw_input === 'object' && typeof raw_input.content === 'string') {
+    if (raw_input.content.trim()) return raw_input.content
+  }
   const state = part?.state
   if (state) {
     if (state.status === 'error') return stringify(state.error)

@@ -85,7 +85,7 @@ export async function startDebugging(
   let sessionId = draft.session_id;
   if (!sessionId) {
     const created = await client.session.create({
-      body: { title: `调试：${draft.extension_id}`, parentID: undefined },
+      body: { title: `调试：${draft.extension_id}` },
       query: { directory: workspace },
     });
     sessionId = created.data?.id ?? null;

@@ -8,7 +8,7 @@ import Button from '@/components/ui/Button.vue'
 
 const open = defineModel({ type: Boolean, default: false })
 
-defineProps({
+const props = defineProps({
   path: { type: String, default: '' },
   content: { type: String, default: '' },
   size: { type: Number, default: 0 },
@@ -18,12 +18,12 @@ defineProps({
 const emit = defineEmits(['close'])
 
 const title = computed(() => {
-  const parts = path.split('/')
-  return parts[parts.length - 1] || path
+  const parts = props.path.split('/')
+  return parts[parts.length - 1] || props.path
 })
 
 const language = computed(() => {
-  const name = path.toLowerCase()
+  const name = props.path.toLowerCase()
   if (name.endsWith('.toml')) return 'toml'
   if (name.endsWith('.properties') || name.endsWith('.ini')) return 'properties'
   if (name.endsWith('.py')) return 'python'
@@ -33,10 +33,10 @@ const language = computed(() => {
 })
 
 const sizeText = computed(() => {
-  if (!size) return ''
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / 1024 / 1024).toFixed(2)} MB`
+  if (!props.size) return ''
+  if (props.size < 1024) return `${props.size} B`
+  if (props.size < 1024 * 1024) return `${(props.size / 1024).toFixed(1)} KB`
+  return `${(props.size / 1024 / 1024).toFixed(2)} MB`
 })
 
 function onKeydown(event) {

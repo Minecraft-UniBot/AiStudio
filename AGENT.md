@@ -683,6 +683,27 @@ import { Icon } from '@iconify/vue'
   - Composable：`use-id`、`use-date-formatter`、`use-direction`、`use-locale`、`use-emit-as-props`、`use-filter`、`use-forward-expose`、`use-forward-props`、`use-forward-props-emits`
   - 路径格式：`/docs/utilities/<name>.md`
 
+##### Tree（reka-ui）
+
+目录树/文件树封装在 `components/ui/Tree.vue`，底层直接复用 reka-ui `TreeRoot` / `TreeItem` / `TreeVirtualizer`（`/docs/components/tree.md`），**禁止手写递归 DOM 树**。键盘导航（方向键、Home/End、Enter/Space 选中展开）、WAI-ARIA Tree 模式、roving focus 均由 reka-ui 内置，封装层只负责数据映射与视觉样式。
+
+常用 API：
+
+- `TreeRoot`：渲染为 `ul`（`as` 可改）
+  - `items: T[]`（节点数组）、`getKey: (val: T) => string`（**必填**，节点唯一 key）、`getChildren: (val: T) => T[] | undefined`（默认 `val.children`；无子节点须返回 `undefined` 而非空数组）
+  - `expanded` / `defaultExpanded: string[]`（展开项 key 数组，可 `v-model:expanded`）、`modelValue` / `defaultValue`（选中值，单选为单值、`multiple` 时为数组）、`multiple`、`selectionBehavior: 'toggle' | 'replace'`、`propagateSelect`、`bubbleSelect`、`disabled`、`dir`
+  - 事件：`update:expanded`、`update:modelValue`；default slot 暴露 `{ flattenItems, modelValue, expanded }`
+  - `flattenItems` 中每个 item 含：`_id`（key）、`value`（原节点）、`index`、`level`（从 1 起）、`parentItem`、`hasChildren`、`bind`（`value` + `level` + aria 定位，直接 `v-bind="item.bind"` 传给 `TreeItem`）
+- `TreeItem`：渲染为 `li`（`as` / `asChild` 可改）
+  - props：`value`（必填）、`level`（必填）、`disabled`
+  - 事件：`select` / `toggle`（`SelectEvent<T>` / `ToggleEvent<T>`，`event.detail.originalEvent` 为原生事件，`event.detail.value` 为节点）；监听后调用 `event.preventDefault()` 可接管默认行为（如点击文件夹只展开不选中）
+  - slot：`isExpanded` / `isSelected` / `isIndeterminate` / `isDisabled` / `handleToggle` / `handleSelect`
+  - data 属性：`data-indent`（层级数字）、`data-expanded`、`data-selected`、`data-disabled`，可直接用于样式
+- `TreeVirtualizer`：`estimateSize` / `overscan` / `textContent`，大目录启用虚拟列表（配合 `@tanstack/virtual`）
+- 默认行为：点击 item 同时触发 `select` + `toggle`；本项目 `Tree.vue` 的做法是——文件夹点击 `preventDefault` 掉 select 只保留展开/折叠，文件点击 `preventDefault` 掉 toggle 并对外 `emit('select', path)`，选中高亮由父组件 `selected` 驱动（`:model-value` 单向传入，`active` class 自行判断）
+
+通用原则：**能用 reka-ui 原生组件的场景一律复用并二次封装到 `components/ui/`**，不重复造轮子；仅当 reka-ui 不覆盖时才自研组件。
+
 ## 十、后端模块规划
 
 建议新增：

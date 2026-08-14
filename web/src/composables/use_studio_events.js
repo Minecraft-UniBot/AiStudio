@@ -16,7 +16,9 @@ export function use_studio_events() {
 
   /** 处理归一化事件：按类型刷新 store 状态 */
   function handle_event(event) {
-    const isCurrent = event.draft_id && store.currentDraft?.value?.id === event.draft_id
+    // 注意：Pinia setup store 返回的 ref 在 store 实例上自动解包，
+    // store.currentDraft 直接就是草稿对象，不能再访问 .value
+    const isCurrent = event.draft_id && store.currentDraft?.id === event.draft_id
     if (isCurrent) {
       switch (event.type) {
         case 'session.status':
@@ -49,7 +51,7 @@ export function use_studio_events() {
           break
       }
     }
-    if (event.type === 'validation.updated' && event.draft_id === store.currentDraft?.value?.id) {
+    if (event.type === 'validation.updated' && event.draft_id === store.currentDraft?.id) {
       store.refreshCurrent(event.draft_id)
     }
   }

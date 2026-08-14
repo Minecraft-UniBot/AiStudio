@@ -70,6 +70,14 @@ export const useStudioStore = defineStore('studio', () => {
     await api(`/drafts/${id}/abort`, { method: 'POST' })
   }
 
+  /** 回退到某条消息之前：OpenCode 恢复文件状态与对话记录，旧校验/审核失效 */
+  async function revertToMessage(id, messageId) {
+    await api(`/drafts/${id}/revert`, {
+      method: 'POST',
+      body: { message_id: messageId },
+    })
+  }
+
   async function fetchDiff(id) {
     diff.value = await api(`/drafts/${id}/diff`)
     return diff.value
@@ -214,6 +222,7 @@ export const useStudioStore = defineStore('studio', () => {
     fetchMessages,
     sendPrompt,
     abort,
+    revertToMessage,
     fetchDiff,
     fetchTodo,
     fetchFiles,
