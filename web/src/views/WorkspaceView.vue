@@ -15,6 +15,8 @@ import PublishDialog from '@/components/studio/PublishDialog.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import ResizablePanel from '@/components/ui/ResizablePanel.vue'
 import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
+import Spinner from '@/components/ui/Spinner.vue'
 import FileViewer from '@/components/studio/FileViewer.vue'
 
 const route = useRoute()
@@ -417,12 +419,12 @@ onMounted(async () => {
                   <dd>{{ new Date(draft.updated_at).toLocaleString() }}</dd>
                 </dl>
               </div>
-              <div v-if="draft.status === 'published'" class="result-section published-box">
-                <Icon icon="lucide:check-circle-2" width="16" color="var(--success)" />
+              <div v-if="draft.status === 'published'" class="result-section status-box success">
+                <Icon icon="lucide:check-circle-2" width="16" />
                 <span>已发布（{{ new Date(draft.published_at).toLocaleString() }}），草稿为只读</span>
               </div>
-              <div v-if="draft.status === 'failed'" class="result-section failed-box">
-                <Icon icon="lucide:alert-triangle" width="16" color="var(--danger)" />
+              <div v-if="draft.status === 'failed'" class="result-section status-box danger">
+                <Icon icon="lucide:alert-triangle" width="16" />
                 <span>{{ draft.error || '生成失败，可在对话区补充需求后重试' }}</span>
               </div>
             </div>
@@ -462,7 +464,10 @@ onMounted(async () => {
       :loading="fileLoading"
     />
   </div>
-  <div v-else class="loading-page">加载草稿…</div>
+  <div v-else class="loading-page">
+    <Spinner :size="18" />
+    <span>加载草稿…</span>
+  </div>
 </template>
 
 <style scoped>
@@ -494,16 +499,17 @@ onMounted(async () => {
 }
 
 .panel-head {
-  height: 38px;
-  padding: 0 10px;
+  height: 40px;
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-secondary);
   flex-shrink: 0;
+  background: var(--surface);
 }
 
 .tabs {
@@ -512,17 +518,19 @@ onMounted(async () => {
 }
 
 .tab {
-  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
   border: none;
   background: transparent;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius);
-  transition: color var(--transition), background-color var(--transition);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  transition:
+    color var(--transition),
+    background-color var(--transition);
 }
 
 .tab:hover {
@@ -563,18 +571,19 @@ onMounted(async () => {
 .right-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 14px 16px;
+  padding: var(--space-1) var(--space-4) var(--space-4);
 }
 
 .expand-left,
 .expand-right {
   align-self: center;
   flex-shrink: 0;
+  margin: 0 var(--space-2);
 }
 
 .result-section {
   border-bottom: 1px solid var(--border);
-  padding: 14px 0;
+  padding: var(--space-4) 0;
 }
 
 .result-section:first-child {
@@ -582,17 +591,18 @@ onMounted(async () => {
 }
 
 .result-section h4 {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
 .info-grid {
   display: grid;
   grid-template-columns: 72px 1fr;
-  gap: 7px;
+  gap: var(--space-2);
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .info-grid dt {
@@ -604,13 +614,27 @@ onMounted(async () => {
   word-break: break-all;
 }
 
-.published-box,
-.failed-box {
+.status-box {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  border: 1px solid;
+  font-weight: 500;
+}
+
+.status-box.success {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.status-box.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: #fecaca;
 }
 
 /* 手机端单栏（Plan 3.2） */
@@ -628,12 +652,13 @@ onMounted(async () => {
 
   .mobile-tab {
     flex: 1;
-    padding: 9px 0;
+    padding: var(--space-3) 0;
     border: none;
     background: transparent;
-    font-size: 13px;
+    font-size: var(--text-sm);
     color: var(--text-muted);
     cursor: pointer;
+    transition: color var(--transition);
   }
 
   .mobile-tab.active {
@@ -658,7 +683,8 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-2);
   color: var(--text-muted);
-  font-size: 13.5px;
+  font-size: var(--text-sm);
 }
 </style>

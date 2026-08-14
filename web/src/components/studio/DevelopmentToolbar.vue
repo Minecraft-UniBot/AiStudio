@@ -48,12 +48,14 @@ function statusVariant(status) {
       <Badge :variant="statusVariant(draft.status)">{{ STATUS_LABELS[draft.status] }}</Badge>
     </div>
     <div class="toolbar-right">
-      <span class="conn" :class="{ on: connected }">
-        <span class="dot" /> {{ connected ? '实时连接' : '重连中' }}
-      </span>
-      <span class="conn" :class="{ on: opencodeAvailable }">
-        <span class="dot" /> OpenCode
-      </span>
+      <Badge :variant="connected ? 'success' : 'warning'">
+        <span class="status-dot" />
+        {{ connected ? '实时连接' : '重连中' }}
+      </Badge>
+      <Badge :variant="opencodeAvailable ? 'success' : 'neutral'">
+        <span class="status-dot" />
+        OpenCode
+      </Badge>
       <Button
         v-if="primaryAction"
         :variant="primaryAction.variant"
@@ -70,12 +72,12 @@ function statusVariant(status) {
 
 <style scoped>
 .toolbar {
-  height: 50px;
-  padding: 0 12px;
+  height: var(--topbar-height);
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   flex-shrink: 0;
   background: var(--surface);
 }
@@ -83,52 +85,37 @@ function statusVariant(status) {
 .draft-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex: 1;
   min-width: 0;
 }
 
 .draft-title .name {
   font-weight: 600;
-  font-size: 14.5px;
+  font-size: var(--text-base);
+  letter-spacing: -0.01em;
 }
 
 .draft-title .id {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
-.conn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.conn.on {
-  color: var(--success);
-}
-
-.conn .dot {
+.status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.conn.on .dot {
-  background: var(--success);
+  background: currentColor;
 }
 
 @media (max-width: 720px) {
-  .conn {
+  .toolbar-right :deep(.ui-badge) {
     display: none;
   }
 }

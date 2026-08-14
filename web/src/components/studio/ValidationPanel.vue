@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import Button from '@/components/ui/Button.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps({
   draft: { type: Object, required: true },
@@ -76,7 +77,12 @@ function stepIcon(status) {
       </Button>
     </div>
 
-    <div v-if="!validation" class="check-empty">尚未运行校验</div>
+    <EmptyState
+      v-if="!validation"
+      icon="lucide:shield-check"
+      title="尚未运行校验"
+      description="点击「运行校验」检查扩展清单、语法、测试和 Loader 绑定"
+    />
     <div v-else class="step-list">
       <div v-for="step in validation.steps" :key="step.id" class="step-item">
         <Icon
@@ -100,32 +106,27 @@ function stepIcon(status) {
 <style scoped>
 .check-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  padding: 14px 0;
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--border);
-}
-
-.check-empty {
-  padding: 24px 0;
-  color: var(--text-muted);
-  font-size: 13px;
 }
 
 .step-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 0;
+  padding: var(--space-3) 0;
 }
 
 .step-item {
   display: flex;
-  gap: 8px;
-  padding: 7px 6px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: var(--text-sm);
   align-items: flex-start;
+  transition: background-color var(--transition);
 }
 
 .step-item:hover {
@@ -165,24 +166,24 @@ function stepIcon(status) {
 }
 
 .step-msg {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .step-detail summary {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
 }
 
 .step-detail pre {
-  margin: 6px 0 0;
-  padding: 8px;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
   background: var(--surface-sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 220px;

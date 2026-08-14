@@ -63,7 +63,7 @@ const canPublishHint = computed(() => {
 <style scoped>
 .result-section {
   border-bottom: 1px solid var(--border);
-  padding: 14px 0;
+  padding: var(--space-4) 0;
 }
 
 .result-section:first-child {
@@ -71,17 +71,18 @@ const canPublishHint = computed(() => {
 }
 
 .result-section h4 {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
 .info-grid {
   display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 7px;
+  grid-template-columns: 72px 1fr;
+  gap: var(--space-2);
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .info-grid dt {
@@ -101,15 +102,16 @@ const canPublishHint = computed(() => {
 
 .publish-hint {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 10px 0 0;
-  font-size: 12px;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.5;
 }
 
 .publish-hint svg {
   flex-shrink: 0;
+  margin-top: 2px;
 }
 </style>

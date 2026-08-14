@@ -4,6 +4,8 @@ import { Icon } from '@iconify/vue'
 import { STATUS_LABELS, TYPE_LABELS } from '@/utils/draft_status'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import Spinner from '@/components/ui/Spinner.vue'
 
 defineProps({
   drafts: { type: Array, default: () => [] },
@@ -43,11 +45,16 @@ function statusVariant(status) {
       OpenCode 服务不可用：{{ ocError || '未知原因' }}。请检查后端日志。
     </p>
 
-    <div v-if="loading" class="empty">加载中…</div>
-    <div v-else-if="drafts.length === 0" class="empty">
-      <Icon icon="lucide:inbox" width="28" />
-      <p>还没有草稿，点击「新建扩展」开始你的第一个扩展</p>
+    <div v-if="loading" class="loading-block">
+      <Spinner :size="16" />
+      <span>加载中…</span>
     </div>
+    <EmptyState
+      v-else-if="drafts.length === 0"
+      icon="lucide:inbox"
+      title="还没有草稿"
+      description="点击「新建扩展」开始你的第一个扩展"
+    />
     <div v-else class="draft-grid">
       <div v-for="draft in drafts" :key="draft.id" class="draft-card">
         <div class="draft-card-head">
@@ -57,8 +64,8 @@ function statusVariant(status) {
         <div class="draft-id mono">{{ draft.extension_id }}</div>
         <p class="draft-desc">{{ draft.description }}</p>
         <div class="draft-types">
-          <span v-for="type in draft.types" :key="type" class="type-tag">{{ TYPE_LABELS[type] }}</span>
-          <span v-if="draft.model" class="type-tag muted">{{ draft.model.model_id }}</span>
+          <Badge v-for="type in draft.types" :key="type" variant="accent">{{ TYPE_LABELS[type] }}</Badge>
+          <Badge v-if="draft.model" variant="neutral">{{ draft.model.model_id }}</Badge>
         </div>
         <div class="draft-card-foot">
           <span class="time">{{ new Date(draft.updated_at).toLocaleString() }}</span>
@@ -87,14 +94,14 @@ function statusVariant(status) {
 .draft-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .oc-unavailable {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
   background: var(--warning-soft);
   border: 1px solid #fde68a;
   border-radius: var(--radius-md);
@@ -102,66 +109,66 @@ function statusVariant(status) {
   font-size: var(--text-sm);
 }
 
-.empty {
+.loading-block {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 56px 0;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
-}
-
-.empty p {
-  margin: 0;
 }
 
 .draft-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
+  gap: var(--space-4);
 }
 
 .draft-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: var(--space-4);
   background: var(--surface);
   box-shadow: var(--shadow);
-  transition: border-color var(--transition), box-shadow var(--transition);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .draft-card:hover {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .draft-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .draft-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--text-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .draft-id {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .draft-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.55;
   display: -webkit-box;
@@ -173,38 +180,25 @@ function statusVariant(status) {
 .draft-types {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.type-tag {
-  font-size: 11.5px;
-  padding: 1px 7px;
-  border-radius: 4px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.type-tag.muted {
-  background: var(--surface-sunken);
-  color: var(--text-muted);
+  gap: var(--space-1);
 }
 
 .draft-card-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   margin-top: auto;
-  padding-top: 4px;
+  padding-top: var(--space-1);
 }
 
 .time {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 </style>

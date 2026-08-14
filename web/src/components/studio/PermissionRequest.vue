@@ -3,7 +3,9 @@
 import { ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
 import { useStudioStore } from '@/stores/studio'
+import { use_toast } from '@/composables/use_toast'
 
 const props = defineProps({
   draftId: { type: String, required: true },
@@ -11,6 +13,7 @@ const props = defineProps({
 })
 
 const store = useStudioStore()
+const { error: toast_error } = use_toast()
 const replying = ref(false)
 
 async function reply(response) {
@@ -18,7 +21,7 @@ async function reply(response) {
   try {
     await store.replyPermission(props.draftId, props.permission.id, response)
   } catch (e) {
-    alert(e.message)
+    toast_error(e.message)
   } finally {
     replying.value = false
   }
@@ -39,19 +42,21 @@ function metaText() {
 <template>
   <div class="permission-card">
     <div class="perm-head">
-      <Icon icon="lucide:shield-alert" width="15" class="perm-icon" />
+      <div class="perm-icon-wrap">
+        <Icon icon="lucide:shield-alert" width="15" class="perm-icon" />
+      </div>
       <span class="perm-title">需要授权</span>
-      <span class="perm-tool mono">{{ permission.tool_name || permission.permission }}</span>
+      <Badge variant="warning" class="perm-tool">{{ permission.tool_name || permission.permission }}</Badge>
     </div>
-    <div class="perm-meta mono">
-      <Icon :icon="metaText().icon" width="13" />
-      <code>{{ metaText().text }}</code>
+    <div class="perm-meta">
+      <Icon :icon="metaText().icon" width="13" class="perm-meta-icon" />
+      <code class="perm-meta-text">{{ metaText().text }}</code>
     </div>
     <p class="perm-desc">{{ permission.description }}</p>
     <div class="perm-actions">
-      <Button size="sm" :disabled="replying" @click="reply('once')">仅允许本次</Button>
-      <Button size="sm" :disabled="replying" @click="reply('always')">本草稿始终允许</Button>
-      <Button variant="danger" size="sm" :disabled="replying" @click="reply('reject')">拒绝</Button>
+      <Button size="sm" variant="secondary" :disabled="replying" @click="reply('once')">仅允许本次</Button>
+      <Button size="sm" variant="primary" :disabled="replying" @click="reply('always')">本草稿始终允许</Button>
+      <Button size="sm" variant="danger" :disabled="replying" @click="reply('reject')">拒绝</Button>
     </div>
   </div>
 </template>
@@ -60,18 +65,31 @@ function metaText() {
 .permission-card {
   border: 1px solid #fde68a;
   background: #fffaeb;
-  border-radius: var(--radius);
-  padding: 12px;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
+  box-shadow: var(--shadow);
 }
 
 .perm-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.perm-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius);
+  background: var(--warning-soft);
+  border: 1px solid #fde68a;
+  flex-shrink: 0;
 }
 
 .perm-icon {
@@ -80,28 +98,35 @@ function metaText() {
 
 .perm-title {
   font-weight: 600;
+  color: var(--text);
 }
 
 .perm-tool {
   margin-left: auto;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  padding: 1px 6px;
-  border-radius: 4px;
 }
 
 .perm-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   overflow: hidden;
 }
 
-.perm-meta code {
+.perm-meta-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.perm-meta-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -109,13 +134,14 @@ function metaText() {
 
 .perm-desc {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .perm-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 </style>

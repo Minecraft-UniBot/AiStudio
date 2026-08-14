@@ -44,29 +44,35 @@ function language_ext() {
 const custom_theme = EditorView.theme({
   '&': {
     height: '100%',
-    fontSize: '12px',
-    backgroundColor: 'var(--surface-sunken)',
+    fontSize: '13px',
+    backgroundColor: 'var(--surface)',
   },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono)',
     lineHeight: '1.7',
+    padding: '4px 0',
   },
   '.cm-content': {
-    caretColor: 'var(--text)',
+    caretColor: 'var(--accent)',
+    padding: '8px 0',
   },
   '&.cm-focused': {
     outline: 'none',
   },
   '.cm-gutters': {
-    backgroundColor: 'var(--surface-sunken)',
+    backgroundColor: 'var(--surface)',
     color: 'var(--text-muted)',
     border: 'none',
+    borderRight: '1px solid var(--border)',
+    padding: '0 4px',
   },
   '.cm-activeLine': {
-    backgroundColor: 'rgb(0 0 0 / 0.02)',
+    backgroundColor: 'rgb(37 99 235 / 0.04)',
   },
   '.cm-activeLineGutter': {
-    backgroundColor: 'rgb(0 0 0 / 0.03)',
+    backgroundColor: 'transparent',
+    color: 'var(--text-secondary)',
+    fontWeight: '600',
   },
   '.cm-selectionBackground': {
     backgroundColor: 'var(--accent-soft)',
@@ -76,11 +82,13 @@ const custom_theme = EditorView.theme({
   },
   '.cm-cursor': {
     borderLeftColor: 'var(--accent)',
+    borderLeftWidth: '2px',
   },
   '.cm-tooltip': {
     backgroundColor: 'var(--surface)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
+    boxShadow: 'var(--shadow-md)',
   },
 })
 
@@ -147,7 +155,12 @@ onBeforeUnmount(() => view?.destroy())
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-sunken);
+  background: var(--surface);
+  transition: border-color var(--transition);
+}
+
+.code-editor:hover {
+  border-color: var(--border-strong);
 }
 
 .code-editor.readonly {

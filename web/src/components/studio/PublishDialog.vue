@@ -74,7 +74,7 @@ const reviewSummary = computed(() => props.draft.review?.summary ?? '')
 .publish-summary {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .summary-row {
@@ -84,45 +84,45 @@ const reviewSummary = computed(() => props.draft.review?.summary ?? '')
 }
 
 .summary-row .label {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .summary-row .value {
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   line-height: 1.55;
 }
 
 .tech-detail {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 10px;
+  padding: var(--space-3);
 }
 
 .tech-detail summary {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12.5px;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
 }
 
 .tech-body {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   border-top: 1px solid var(--border);
-  padding-top: 8px;
+  padding-top: var(--space-2);
 }
 
 .tech-step {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
   margin: 0;
 }
 
@@ -139,20 +139,20 @@ const reviewSummary = computed(() => props.draft.review?.summary ?? '')
 }
 
 .tech-revision {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .restart-hint {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-2);
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--space-3);
   background: var(--warning-soft);
   border: 1px solid #fde68a;
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: #92400e;
   line-height: 1.5;
 }

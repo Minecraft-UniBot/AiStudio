@@ -271,8 +271,12 @@ function todo_priority_class(priority) {
 <style scoped>
 .message {
   display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2) 0;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+}
+
+.message.user {
+  flex-direction: row-reverse;
 }
 
 .message.user .avatar {
@@ -281,16 +285,18 @@ function todo_priority_class(priority) {
 }
 
 .avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius);
-  background: var(--bg-hover);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   margin-top: 2px;
+  box-shadow: var(--shadow);
 }
 
 .message-body {
@@ -301,22 +307,22 @@ function todo_priority_class(priority) {
   gap: var(--space-1);
 }
 
-/* 用户消息卡片：与 AI 消息区分（Plan：卡片内衬 + 边框 + 圆角） */
+/* 用户消息卡片：右对齐气泡，与 AI 消息区分 */
 .message.user .message-body.user-card {
   position: relative;
-  align-self: flex-start;
+  align-self: flex-end;
   max-width: 88%;
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
 }
 
 /* 回退按钮：悬停用户消息时显示 */
 .revert-btn {
   position: absolute;
-  top: 5px;
-  right: 5px;
+  top: 4px;
+  right: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -329,7 +335,10 @@ function todo_priority_class(priority) {
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
+  transition:
+    opacity 150ms ease-out,
+    color 150ms ease-out,
+    border-color 150ms ease-out;
 }
 
 .message.user:hover .revert-btn,
@@ -404,10 +413,10 @@ function todo_priority_class(priority) {
 
 .markdown-body :deep(blockquote) {
   margin: var(--space-2) 0;
-  padding: var(--space-1) var(--space-3);
-  border-left: 3px solid var(--border-strong);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent);
   color: var(--text-secondary);
-  background: var(--surface-sunken);
+  background: var(--accent-soft);
   border-radius: 0 var(--radius) var(--radius) 0;
 }
 
@@ -417,7 +426,8 @@ function todo_priority_class(priority) {
   background: var(--surface-sunken);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 1px 4px;
+  padding: 1px 5px;
+  color: var(--text);
 }
 
 .markdown-body :deep(pre) {
@@ -425,7 +435,7 @@ function todo_priority_class(priority) {
   padding: var(--space-3);
   background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow-x: auto;
 }
 
@@ -437,6 +447,7 @@ function todo_priority_class(priority) {
   font-size: 12px;
   line-height: 1.6;
   white-space: pre;
+  color: var(--text);
 }
 
 .markdown-body :deep(table) {
@@ -466,27 +477,57 @@ function todo_priority_class(priority) {
 
 .reasoning {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow: hidden;
+  background: var(--surface-sunken);
 }
 
 .reasoning summary {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   background: var(--surface-sunken);
   user-select: none;
+  transition: background-color var(--transition);
+}
+
+.reasoning summary:hover {
+  background: var(--bg-hover);
+}
+
+.reasoning summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning summary::marker {
+  content: '';
+}
+
+.reasoning summary::after {
+  content: '';
+  margin-left: auto;
+  width: 0;
+  height: 0;
+  border-left: 4px solid var(--text-muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform: rotate(90deg);
+  transition: transform var(--transition);
+}
+
+.reasoning[open] summary::after {
+  transform: rotate(-90deg);
 }
 
 .reasoning-body {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   font-size: var(--text-xs);
   color: var(--text-secondary);
-  background: var(--surface-sunken);
+  background: var(--surface);
   border-top: 1px solid var(--border);
   line-height: 1.65;
 }
@@ -506,20 +547,31 @@ function todo_priority_class(priority) {
 
 .tool-call {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: border-color var(--transition);
+}
+
+.tool-call.run {
+  border-color: var(--accent-soft);
+}
+
+.tool-call.fail {
+  border-color: #fecaca;
 }
 
 .tool-head {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: var(--surface-sunken);
   font-size: var(--text-xs);
   cursor: pointer;
   user-select: none;
+  transition: background-color var(--transition);
 }
 
 .tool-head:hover {
@@ -528,6 +580,7 @@ function todo_priority_class(priority) {
 
 .tool-icon {
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .tool-chevron {
@@ -547,6 +600,8 @@ function todo_priority_class(priority) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .tool-state {
@@ -558,30 +613,52 @@ function todo_priority_class(priority) {
 .tool-call.ok .tool-state { color: var(--success); }
 .tool-call.fail .tool-state { color: var(--danger); }
 .tool-call.run .tool-icon { color: var(--accent); }
+.tool-call.run .tool-name { color: var(--text); }
 
 .tool-progress {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);
   color: var(--text-secondary);
   border-top: 1px solid var(--border);
+  background: var(--surface-sunken);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tool-progress::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 /* ---------- todowrite 任务清单 ---------- */
 .todo-list {
   border-top: 1px solid var(--border);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+  background: var(--surface-sunken);
 }
 
 .todo-item {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 3px 2px;
+  padding: 4px 6px;
   font-size: var(--text-xs);
   border-radius: 4px;
+  line-height: 1.5;
 }
 
 .todo-check {
@@ -606,15 +683,20 @@ function todo_priority_class(priority) {
   flex: 1;
   min-width: 0;
   word-break: break-word;
+  color: var(--text-secondary);
+}
+
+.todo-item.in_progress .todo-text {
+  color: var(--text);
 }
 
 .todo-priority {
   flex-shrink: 0;
   font-size: 10px;
   line-height: 1;
-  padding: 2px 5px;
+  padding: 2px 6px;
   border-radius: 999px;
-  background: var(--surface-sunken);
+  background: var(--surface);
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
@@ -632,23 +714,25 @@ function todo_priority_class(priority) {
 /* ---------- AI 提问（question 工具） ---------- */
 .question-cards {
   border-top: 1px solid var(--border);
-  padding: var(--space-2);
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  background: var(--surface-sunken);
 }
 
 .question-card {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-sunken);
-  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-3);
+  box-shadow: var(--shadow);
 }
 
 .q-head {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text);
@@ -667,7 +751,7 @@ function todo_priority_class(priority) {
 }
 
 .q-text {
-  margin: var(--space-1) 0;
+  margin: var(--space-2) 0 0;
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-secondary);
@@ -678,22 +762,23 @@ function todo_priority_class(priority) {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
 }
 
 .q-option {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: var(--space-1) var(--space-2);
-  background: var(--surface);
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 .q-option-label {
   font-size: var(--text-xs);
   color: var(--text);
+  font-weight: 500;
 }
 
 .q-option-desc {
@@ -711,9 +796,9 @@ function todo_priority_class(priority) {
 
 .tool-output {
   margin: 0;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   font-size: var(--text-xs);
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 240px;
@@ -731,10 +816,10 @@ function todo_priority_class(priority) {
 .step-line {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-secondary);
-  padding: 1px 0;
+  padding: var(--space-1) 0;
 }
 
 .step-line.warning-text {
@@ -743,14 +828,20 @@ function todo_priority_class(priority) {
 
 .error-line {
   display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: var(--danger-soft);
   border: 1px solid #fecaca;
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   color: var(--danger);
   font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.error-line :deep(svg) {
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 .spin {

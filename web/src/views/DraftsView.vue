@@ -8,6 +8,7 @@ import { use_toast } from '@/composables/use_toast'
 import DraftList from '@/components/studio/DraftList.vue'
 import DraftCreateDialog from '@/components/studio/DraftCreateDialog.vue'
 import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
 
 const router = useRouter()
 const store = useStudioStore()
@@ -48,16 +49,19 @@ async function removeDraft(draft) {
   <div class="drafts-page">
     <header class="topbar">
       <div class="topbar-left">
-        <Icon icon="lucide:box" width="20" class="brand-icon" />
+        <div class="brand-icon">
+          <Icon icon="lucide:box" width="18" />
+        </div>
         <span class="title">UniBot Extension Studio</span>
-        <span v-if="store.status" class="oc-status" :class="{ ok: store.opencodeAvailable }">
-          <span class="dot" /> OpenCode {{ store.opencodeAvailable ? `v${store.status.version}` : '不可用' }}
-        </span>
+        <Badge v-if="store.status" :variant="store.opencodeAvailable ? 'success' : 'danger'">
+          <span class="status-dot" />
+          OpenCode {{ store.opencodeAvailable ? `v${store.status.version}` : '不可用' }}
+        </Badge>
       </div>
       <div class="topbar-right">
-        <RouterLink to="/admin" class="topbar-link">
+        <Button variant="ghost" size="sm" @click="router.push('/admin')">
           <Icon icon="lucide:settings" width="15" /> 设置
-        </RouterLink>
+        </Button>
       </div>
     </header>
 
@@ -71,7 +75,7 @@ async function removeDraft(draft) {
           <Button v-if="store.opencodeAvailable" variant="primary" @click="dialogOpen = true">
             <Icon icon="lucide:plus" width="16" /> 新建扩展
           </Button>
-          <Button v-else @click="store.fetchStatus()">
+          <Button v-else variant="secondary" @click="store.fetchStatus()">
             <Icon icon="lucide:refresh-cw" width="15" /> 刷新状态
           </Button>
         </div>
@@ -99,8 +103,8 @@ async function removeDraft(draft) {
 }
 
 .topbar {
-  height: 52px;
-  padding: 0 20px;
+  height: var(--topbar-height);
+  padding: 0 var(--space-5);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -112,16 +116,31 @@ async function removeDraft(draft) {
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
 .title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--text-md);
+  letter-spacing: -0.01em;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .topbar-right {
@@ -129,49 +148,10 @@ async function removeDraft(draft) {
   align-items: center;
 }
 
-.topbar-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  transition: background-color var(--transition), color var(--transition);
-}
-
-.topbar-link:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.oc-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--danger);
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--danger-soft);
-}
-
-.oc-status.ok {
-  color: var(--success);
-  background: var(--success-soft);
-}
-
-.oc-status .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: var(--space-6);
   max-width: 1100px;
   width: 100%;
   margin: 0 auto;
@@ -181,24 +161,25 @@ async function removeDraft(draft) {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .page-head h2 {
-  margin: 0 0 4px;
-  font-size: 20px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xl);
+  font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 .page-head .sub {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
 @media (max-width: 640px) {
-  .oc-status {
+  .topbar-left :deep(.ui-badge) {
     display: none;
   }
 }

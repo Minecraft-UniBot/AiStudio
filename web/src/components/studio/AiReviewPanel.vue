@@ -46,34 +46,36 @@ function severityIcon(severity) {
 <style scoped>
 .result-section {
   border-bottom: 1px solid var(--border);
-  padding: 14px 0;
+  padding: var(--space-4) 0;
 }
 
 .result-section h4 {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
 .review-summary {
-  margin: 0 0 10px;
-  font-size: 13.5px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
   line-height: 1.6;
+  color: var(--text-secondary);
 }
 
 .issue-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .issue-item {
   display: flex;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .issue-item.must_fix {
@@ -116,23 +118,23 @@ function severityIcon(severity) {
 }
 
 .issue-file {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .issue-detail summary {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
 }
 
 .issue-detail pre {
-  margin: 6px 0 0;
-  padding: 8px;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
   background: var(--surface-sunken);
   border-radius: var(--radius);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 180px;

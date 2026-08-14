@@ -55,7 +55,10 @@ function on_toggle(event) {
 
 <template>
   <div class="tree">
-    <div v-if="nodes.length === 0" class="tree-empty">{{ emptyText }}</div>
+    <div v-if="nodes.length === 0" class="tree-empty">
+      <Icon icon="lucide:folder-search" width="22" class="tree-empty-icon" />
+      <span>{{ emptyText }}</span>
+    </div>
     <TreeRoot
       v-else
       :items="nodes"
@@ -81,17 +84,18 @@ function on_toggle(event) {
               :style="{ '--level': item.level }"
             >
               <Icon
-                :icon="item.hasChildren ? (isExpanded ? 'lucide:folder-open' : 'lucide:folder') : 'lucide:file-code'"
-                width="13"
+                v-if="item.hasChildren"
+                :icon="isExpanded ? 'lucide:folder-open' : 'lucide:folder'"
+                width="14"
+                class="tree-icon"
+              />
+              <Icon
+                v-else
+                icon="lucide:file-code"
+                width="14"
+                class="tree-icon file"
               />
               <span class="tree-name">{{ item.value.name }}</span>
-              <Icon
-                v-if="item.hasChildren"
-                icon="lucide:chevron-right"
-                width="12"
-                class="tree-chevron"
-                :class="{ rotated: isExpanded }"
-              />
             </div>
           </template>
         </TreeItem>
@@ -104,15 +108,24 @@ function on_toggle(event) {
 .tree {
   flex: 1;
   overflow-y: auto;
-  padding: 6px;
-  font-size: 12.5px;
-  --indent-step: 14px;
+  overflow-x: hidden;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  --indent-step: 16px;
 }
 
 .tree-empty {
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-3);
   color: var(--text-muted);
-  font-size: 12.5px;
+  font-size: var(--text-xs);
+}
+
+.tree-empty-icon {
+  opacity: 0.5;
 }
 
 /* TreeRoot 渲染为 ul，TreeItem 渲染为 li，去掉默认列表样式 */
@@ -124,50 +137,66 @@ function on_toggle(event) {
 
 .tree-item {
   list-style: none;
+  outline: none;
 }
 
 .tree-label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-top: 3px;
-  padding-bottom: 3px;
-  padding-right: 6px;
-  padding-left: calc(6px + (var(--level, 1) - 1) * var(--indent-step));
-  border-radius: 4px;
+  gap: var(--space-1);
+  padding: 4px var(--space-2);
+  padding-left: calc(var(--space-2) + (var(--level, 1) - 1) * var(--indent-step));
+  border-radius: var(--radius);
   cursor: pointer;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
+  transition: background var(--transition), color var(--transition);
 }
 
 .tree-label:hover {
   background: var(--bg-hover);
 }
 
-.tree-label.active,
-.tree-label.folder.active {
+.tree-label.active {
   background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.tree-label.active .tree-icon {
   color: var(--accent);
 }
 
 .tree-label.folder {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.tree-label.folder:hover {
+  color: var(--text);
+}
+
+.tree-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color var(--transition);
+}
+
+.tree-label.folder .tree-icon {
+  color: var(--warning);
+}
+
+.tree-icon.file {
+  color: var(--text-muted);
+}
+
+.tree-label:hover .tree-icon.file {
   color: var(--text-secondary);
 }
 
 .tree-name {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.tree-chevron {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--text-muted);
-  transition: transform 150ms ease-out;
-}
-
-.tree-chevron.rotated {
-  transform: rotate(90deg);
 }
 </style>

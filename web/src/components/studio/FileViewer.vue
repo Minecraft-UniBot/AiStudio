@@ -58,33 +58,39 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="file-viewer">
-      <div class="file-viewer-backdrop" @click="close" />
-      <div class="file-viewer-panel" role="dialog" aria-label="文件预览">
-        <header class="file-viewer-head">
-          <Icon icon="lucide:file-code" width="16" class="file-viewer-icon" />
-          <span class="file-viewer-title mono">{{ title }}</span>
-          <span class="file-viewer-path mono">{{ path }}</span>
-          <span v-if="sizeText" class="file-viewer-size">{{ sizeText }}</span>
-          <span class="file-viewer-spacer" />
-          <Button variant="ghost" icon-only size="sm" title="关闭 (Esc)" @click="close">
-            <Icon icon="lucide:x" width="16" />
-          </Button>
-        </header>
-        <div class="file-viewer-body">
-          <CodeEditor
-            v-if="!loading && content !== ''"
-            :model-value="content"
-            :language="language"
-            readonly
-          />
-          <div v-else class="file-viewer-loading">
-            <Icon icon="lucide:loader-2" width="18" class="spin" />
-            <span>加载文件内容…</span>
+    <Transition name="file-viewer">
+      <div v-if="open" class="file-viewer">
+        <div class="file-viewer-backdrop" @click="close" />
+        <div class="file-viewer-panel" role="dialog" aria-label="文件预览">
+          <header class="file-viewer-head">
+            <div class="file-viewer-head-left">
+              <Icon icon="lucide:file-code" width="16" class="file-viewer-icon" />
+              <span class="file-viewer-title mono">{{ title }}</span>
+              <span v-if="sizeText" class="file-viewer-size">{{ sizeText }}</span>
+            </div>
+            <div class="file-viewer-path-wrap" :title="path">
+              <Icon icon="lucide:folder" width="12" class="file-viewer-path-icon" />
+              <span class="file-viewer-path mono">{{ path }}</span>
+            </div>
+            <Button variant="ghost" icon-only size="sm" title="关闭 (Esc)" @click="close">
+              <Icon icon="lucide:x" width="16" />
+            </Button>
+          </header>
+          <div class="file-viewer-body">
+            <CodeEditor
+              v-if="!loading && content !== ''"
+              :model-value="content"
+              :language="language"
+              readonly
+            />
+            <div v-else class="file-viewer-loading">
+              <Icon icon="lucide:loader-2" width="20" class="spin" />
+              <span>加载文件内容…</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -102,8 +108,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 .file-viewer-backdrop {
   position: absolute;
   inset: 0;
-  background: rgb(24 24 27 / 0.5);
-  animation: backdrop-fade 150ms ease-out;
+  background: rgb(24 24 27 / 0.45);
+  backdrop-filter: blur(2px);
 }
 
 .file-viewer-panel {
@@ -111,24 +117,30 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   display: flex;
   flex-direction: column;
   width: min(960px, 94vw);
-  height: min(80vh, 88vh);
+  height: min(82vh, 88vh);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
-  animation: panel-in 180ms ease-out;
 }
 
 .file-viewer-head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
-  background: var(--surface-sunken);
+  background: var(--surface);
   flex-shrink: 0;
-  min-height: 46px;
+  min-height: 48px;
+}
+
+.file-viewer-head-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .file-viewer-icon {
@@ -139,6 +151,33 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 .file-viewer-title {
   font-size: var(--text-sm);
   font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.file-viewer-size {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 1px var(--space-2);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.file-viewer-path-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 2px var(--space-2);
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.file-viewer-path-icon {
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -151,55 +190,60 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   min-width: 0;
 }
 
-.file-viewer-size {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  background: var(--bg-hover);
-  padding: 1px 6px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.file-viewer-spacer {
-  flex: 1;
-}
-
 .file-viewer-body {
   flex: 1;
   min-height: 0;
   background: var(--surface-sunken);
+  padding: var(--space-2);
+}
+
+.file-viewer-body :deep(.code-editor) {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 .file-viewer-loading {
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
 
 .spin {
   animation: spin 1s linear infinite;
-}
-
-@keyframes backdrop-fade {
-  from {
-    opacity: 0;
-  }
-}
-
-@keyframes panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
+  color: var(--accent);
 }
 
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Transition */
+.file-viewer-enter-active,
+.file-viewer-leave-active {
+  transition: opacity 180ms ease-out;
+}
+
+.file-viewer-enter-active .file-viewer-panel,
+.file-viewer-leave-active .file-viewer-panel {
+  transition: transform 180ms ease-out, opacity 180ms ease-out;
+}
+
+.file-viewer-enter-from,
+.file-viewer-leave-to {
+  opacity: 0;
+}
+
+.file-viewer-enter-from .file-viewer-panel,
+.file-viewer-leave-to .file-viewer-panel {
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
 }
 </style>

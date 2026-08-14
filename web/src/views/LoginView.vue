@@ -38,25 +38,35 @@ async function login() {
   <div class="login-page">
     <div class="login-card">
       <div class="brand">
-        <Icon icon="lucide:box" width="28" />
+        <div class="brand-icon">
+          <Icon icon="lucide:box" width="28" />
+        </div>
         <h1>UniBot Extension Studio</h1>
         <p>用自然语言创建、检查、审核并发布 UniBot 扩展</p>
       </div>
       <form class="login-form" @submit.prevent="login">
-        <label class="field-label" for="password">访问口令</label>
-        <Input
-          id="password"
-          v-model="password"
-          type="password"
-          placeholder="请输入平台访问口令"
-        />
-        <p v-if="errorMsg" class="error">{{ errorMsg }}</p>
-        <Button variant="primary" class="login-btn" :loading="loading">
-          <Icon icon="lucide:log-in" width="16" />
+        <div class="field">
+          <label class="field-label" for="password">访问口令</label>
+          <Input
+            id="password"
+            v-model="password"
+            type="password"
+            placeholder="请输入平台访问口令"
+          />
+        </div>
+        <p v-if="errorMsg" class="error">
+          <Icon icon="lucide:alert-circle" width="14" />
+          {{ errorMsg }}
+        </p>
+        <Button variant="primary" class="login-btn" :loading="loading" type="submit">
+          <Icon v-if="!loading" icon="lucide:log-in" width="16" />
           {{ loading ? '登录中…' : '进入平台' }}
         </Button>
       </form>
-      <p class="hint">口令存储在后端配置（~/.unibot-studio/config/studio.json），首次启动自动生成</p>
+      <p class="hint">
+        <Icon icon="lucide:info" width="13" />
+        口令存储在后端配置（~/.unibot-studio/config/studio.json），首次启动自动生成
+      </p>
     </div>
   </div>
 </template>
@@ -67,60 +77,100 @@ async function login() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  padding: var(--space-4);
+  background:
+    radial-gradient(circle at 30% 20%, var(--accent-soft), transparent 55%),
+    var(--bg);
 }
 
 .login-card {
   width: 380px;
+  max-width: 100%;
   padding: 32px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
 }
 
 .brand {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
+}
+
+.brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
 .brand h1 {
-  font-size: 18px;
-  margin: 8px 0 4px;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-1);
   color: var(--text);
 }
 
 .brand p {
   margin: 0;
-  font-size: 12.5px;
-  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .field-label {
-  display: block;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
+  font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 6px;
 }
 
 .error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--danger);
-  font-size: 12.5px;
-  margin: 8px 0 0;
+  font-size: var(--text-sm);
+  margin: 0;
 }
 
 .login-btn {
   width: 100%;
   justify-content: center;
-  margin-top: 16px;
+  margin-top: var(--space-2);
 }
 
 .hint {
-  margin-top: 20px;
-  font-size: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin: var(--space-5) 0 0;
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  text-align: center;
+  text-align: left;
   line-height: 1.5;
+}
+
+.hint svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 </style>

@@ -11,6 +11,7 @@ import Checkbox from '@/components/ui/Checkbox.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Textarea from '@/components/ui/Textarea.vue'
 import Dialog from '@/components/ui/Dialog.vue'
+import Select from '@/components/ui/Select.vue'
 
 const router = useRouter()
 const store = useStudioStore()
@@ -163,9 +164,10 @@ function permissionVariant(permission) {
       </Button>
       <span class="title">平台设置</span>
       <div class="spacer" />
-      <span class="conn" :class="{ on: store.opencodeAvailable }">
-        <span class="dot" /> OpenCode {{ store.status?.version ?? '' }}
-      </span>
+      <Badge :variant="store.opencodeAvailable ? 'success' : 'neutral'">
+        <span class="status-dot" />
+        OpenCode {{ store.status?.version ?? '未连接' }}
+      </Badge>
     </header>
 
     <main class="content">
@@ -278,20 +280,12 @@ function permissionVariant(permission) {
               <small>当前 v{{ prompt.current_version }} · {{ prompt.versions.length }} 个版本</small>
             </div>
             <div class="prompt-actions">
-              <select
-                class="version-select mono"
-                :value="prompt.current_version"
-                title="选择并启用版本"
-                @change="activateVersion(prompt, Number($event.target.value))"
-              >
-                <option
-                  v-for="version in prompt.versions"
-                  :key="version.version"
-                  :value="version.version"
-                >
-                  v{{ version.version }}{{ version.version === prompt.current_version ? '（当前）' : '' }}
-                </option>
-              </select>
+              <Select
+                :model-value="String(prompt.current_version)"
+                :options="prompt.versions.map((v) => ({ value: String(v.version), label: `v${v.version}${v.version === prompt.current_version ? '（当前）' : ''}` }))"
+                class="version-select"
+                @update:model-value="(value) => activateVersion(prompt, Number(value))"
+              />
               <Button size="sm" @click="openPromptEditor(prompt)">
                 <Icon icon="lucide:pencil" width="13" /> 编辑
               </Button>
@@ -321,6 +315,7 @@ function permissionVariant(permission) {
       :description="editingPrompt ? `正在编辑 ${editingPrompt.name}.md（基于 v${editingPrompt.version}）` : ''"
       confirm-text="保存为新版本"
       :loading="promptSaving"
+      width="min(640px, calc(100vw - 32px))"
       @confirm="savePromptVersion"
     >
       <p v-if="editingPrompt" class="editor-tip">
@@ -344,37 +339,27 @@ function permissionVariant(permission) {
 }
 
 .topbar {
-  height: 50px;
-  padding: 0 16px;
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   flex-shrink: 0;
   background: var(--surface);
 }
 
 .title {
   font-weight: 600;
+  font-size: var(--text-md);
+  letter-spacing: -0.01em;
 }
 
 .spacer {
   flex: 1;
 }
 
-.conn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.conn.on {
-  color: var(--success);
-}
-
-.conn .dot {
+.status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -384,31 +369,32 @@ function permissionVariant(permission) {
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: var(--space-6);
   max-width: 760px;
   width: 100%;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 18px;
+  padding: var(--space-5);
   background: var(--surface);
   box-shadow: var(--shadow);
 }
 
 .card h3 {
-  margin: 0 0 6px;
-  font-size: 14.5px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 600;
 }
 
 .card-sub {
-  margin: 0 0 14px;
-  font-size: 12.5px;
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -418,17 +404,18 @@ function permissionVariant(permission) {
 .step-order-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 .feature-item {
   display: flex;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: flex-start;
   cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  transition: background-color var(--transition);
 }
 
 .feature-item:hover {
@@ -442,13 +429,13 @@ function permissionVariant(permission) {
 
 .feature-item span {
   display: block;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
 .feature-item small {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .tool-item,
@@ -457,8 +444,8 @@ function permissionVariant(permission) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
@@ -474,7 +461,7 @@ function permissionVariant(permission) {
 .tool-info small,
 .prompt-info small {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .tool-meta,
@@ -482,7 +469,7 @@ function permissionVariant(permission) {
 .step-order-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
@@ -493,7 +480,7 @@ function permissionVariant(permission) {
 .step-order-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .order-badge {
@@ -505,42 +492,37 @@ function permissionVariant(permission) {
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .step-order-name {
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .version-select {
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 12px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
+  min-width: 140px;
 }
 
 .editor-tip {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: 1.5;
 }
 
 .prompt-editor {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 
 .info-grid {
   display: grid;
   grid-template-columns: 90px 1fr;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .info-grid dt {
