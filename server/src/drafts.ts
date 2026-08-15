@@ -224,6 +224,7 @@ export function createDraft(input: {
     types: input.types,
     owner_id: 'admin',
     status: 'draft',
+    phase: 'planning',
     session_id: null,
     review_session_id: null,
     model: input.model,

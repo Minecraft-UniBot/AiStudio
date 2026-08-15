@@ -69,7 +69,7 @@ export async function startCoding(draftId: string): Promise<void> {
     },
     query: { directory: workspace },
   });
-  updateDraft(draftId, { status: 'coding' });
+  updateDraft(draftId, { status: 'coding', phase: 'coding' });
   logger.info('draft', '规划完成，进入编码阶段', {
     draft_id: draftId,
     extension_id: draft.extension_id,

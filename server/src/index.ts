@@ -323,8 +323,14 @@ async function handleRequest(req: Request): Promise<Response> {
             });
             // 新消息会触发 opencode 的 revert cleanup（物理删除被回退的消息），
             // 因此清除暂存过滤标记，避免把新消息也过滤掉。
+            // 状态恢复：abort 后用户重新发消息视为「继续当前阶段」，按 phase 恢复 status，
+            // 否则流水线在会话再次空闲时不会自动进入下一阶段（planning→coding 等）。
+            const resumeStatus =
+              draft.phase === 'planning' || draft.phase === 'coding' || draft.phase === 'debugging'
+                ? draft.phase
+                : 'draft';
             updateDraft(draftId, {
-              status: 'draft',
+              status: resumeStatus,
               ...(draft.revert_message_id ? { revert_message_id: null } : {}),
             });
             logger.info('draft', '发送新消息', {
@@ -338,8 +344,11 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'abort': {
           if (req.method === 'POST' && draft.session_id) {
-            await client.session.abort({ path: { id: draft.session_id }, query: { directory: workspace } });
+            // 先置回 draft：session.abort 会触发 opencode 的 MessageAbortedError 与 idle 事件，
+            // 必须让事件回调看到非阶段状态，避免「中止」被误判为「阶段完成」而自动进入下一阶段；
+            // phase 保留，用户重新发消息时恢复（见 messages 端点）。
             updateDraft(draftId, { status: 'draft' });
+            await client.session.abort({ path: { id: draft.session_id }, query: { directory: workspace } });
             logger.info('draft', '停止生成', { draft_id: draftId, extension_id: draft.extension_id });
             return json({ ok: true });
           }
@@ -371,6 +380,7 @@ async function handleRequest(req: Request): Promise<Response> {
             // 文件已恢复、对话待物理清理：重置规划/审查/摘要并记录回退点，锁定一键发布
             updateDraft(draftId, {
               status: 'draft',
+              phase: null,
               validation: null,
               validation_revision: null,
               review: null,
@@ -689,6 +699,13 @@ await opencode.start();
 // 恢复已存在草稿的会话登记（必须在事件订阅启动之前，
 // 否则订阅协调循环看不到这些工作区）
 for (const draft of listDrafts()) {
+  // 旧版草稿没有 phase 字段：按当前 status 回填（保证中止后继续的自动流转对旧草稿同样生效）
+  if (
+    !draft.phase &&
+    (draft.status === 'planning' || draft.status === 'coding' || draft.status === 'debugging')
+  ) {
+    updateDraft(draft.id, { phase: draft.status });
+  }
   if (draft.session_id) {
     trackSession(draft.id, draft.session_id);
     logger.debug('sessions', '启动时恢复会话登记', {

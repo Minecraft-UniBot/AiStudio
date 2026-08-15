@@ -16,6 +16,9 @@ export type DraftStatus =
   | 'failed'      // 连续无进展 / 超出轮次
   | 'error';      // 会话丢失等可恢复错误
 
+/** 流水线阶段（与草稿主状态机正交：status 可被 abort/聊天等交互置回 draft，phase 保留用于续接流转） */
+export type PipelinePhase = 'planning' | 'coding' | 'reviewing' | 'debugging';
+
 /** 扩展类型（第一版仅 api / command） */
 export type ExtensionType = 'api' | 'command' | 'renderer' | 'template' | 'resources';
 
@@ -103,6 +106,12 @@ export interface DraftMeta {
   types: ExtensionType[];
   owner_id: string;
   status: DraftStatus;
+  /**
+   * 当前流水线阶段。与 status 不同：abort / 聊天消息会把 status 置为 draft，
+   * 但 phase 保留，用户重新发消息时按 phase 恢复 status，保证
+   * 规划→编码→审查的自动流转在「中止后继续」场景下仍然生效。
+   */
+  phase?: PipelinePhase | null;
   session_id: string | null;
   review_session_id: string | null;
   model: ModelChoice | null;

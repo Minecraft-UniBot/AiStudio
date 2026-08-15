@@ -177,11 +177,16 @@ function normalize(raw: Record<string, unknown>): StudioEvent | null {
   switch (type) {
     case 'session.status': {
       // status 是 SessionStatus 联合对象：{ type: 'idle' | 'busy' | 'retry', ... }
-      const statusObj = props.status as Record<string, unknown> | undefined;
+      // 防御：个别版本可能直接下发字符串（如 "idle"）
+      const statusRaw = props.status;
+      const statusType =
+        typeof statusRaw === 'string'
+          ? statusRaw
+          : String((statusRaw as Record<string, unknown> | undefined)?.type ?? '');
       return {
         ...base,
         type: 'session.status',
-        status: String(statusObj?.type ?? ''),
+        status: statusType,
       };
     }
     case 'session.idle':
@@ -328,7 +333,7 @@ async function settleAndRecheck(draftId: string) {
     }
     if (!outcome.changed) {
       // 修复无进展但未熔断：回到 draft 等待用户决定（前端展示原因）
-      updateDraft(draftId, { status: 'draft' });
+      updateDraft(draftId, { status: 'draft', phase: null });
       broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
       return;
     }
@@ -339,14 +344,30 @@ async function settleAndRecheck(draftId: string) {
     logger.error('events', '修复结算失败', { draft_id: draftId, error: (e as Error).message });
     const current = readDraft(draftId);
     if (current.status === 'debugging') {
-      updateDraft(draftId, { status: 'draft', error: (e as Error).message });
+      updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
       broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
     }
   }
 }
 
+/**
+ * 闲置信号去重：opencode 在会话空闲时成对下发 session.status{type:'idle'} 与 session.idle
+ * （见 opencode packages/opencode/src/session/status.ts 的 set()），SDK 的 onSseEvent
+ * 不等待回调，两个事件会并发进入 settleSessionState，导致阶段流转执行两次
+ * （编码提示词发双份、审查会话开两个）。按 draftId:sessionId 在短窗口内只处理一次。
+ * busy 事件到达（新一轮运行开始）时清除标记。
+ */
+const LAST_IDLE = new Map<string, number>();
+const IDLE_DEDUP_MS = 2000;
+
 async function settleSessionState(draftId: string, sessionId: string, ev: StudioEvent) {
   if (ev.type === 'session.error') {
+    // 主动中止（停止按钮 / abort 接口）会触发 opencode 的 MessageAbortedError，
+    // 不是真正的会话错误：跳过，不置 error、不清除 phase
+    //（abort 端点已先把 status 置为 draft，phase 留给「继续」时恢复）。
+    if (ev.error.includes('MessageAbortedError') || ev.error.includes('Aborted')) {
+      return;
+    }
     let draft;
     try {
       draft = readDraft(draftId);
@@ -354,13 +375,24 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
       return; // 草稿已删除
     }
     logger.warn('draft', `会话错误，草稿置为 error`, { draft_id: draftId, extension_id: draft.extension_id, error: ev.error });
-    updateDraft(draftId, { status: 'error', error: ev.error });
+    updateDraft(draftId, { status: 'error', phase: null, error: ev.error });
     broadcast({ type: 'draft.updated', draft_id: draftId, status: 'error' });
     return;
   }
 
   const isIdle = ev.type === 'session.idle' || (ev.type === 'session.status' && ev.status === 'idle');
-  if (!isIdle) return;
+  if (!isIdle) {
+    // 新一轮运行开始（busy）→ 清除旧的闲置标记，避免后续真实完成被误判为重复事件
+    if (ev.type === 'session.status' && ev.status === 'busy') {
+      LAST_IDLE.delete(`${draftId}:${sessionId}`);
+    }
+    return;
+  }
+  // 成对事件去重（session.status{idle} 与 session.idle 只处理一次流转）
+  const idleKey = `${draftId}:${sessionId}`;
+  const now = Date.now();
+  if (now - (LAST_IDLE.get(idleKey) ?? 0) < IDLE_DEDUP_MS) return;
+  LAST_IDLE.set(idleKey, now);
 
   let draft;
   try {
@@ -383,7 +415,7 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
         broadcast({ type: 'draft.updated', draft_id: draftId, status: 'coding' });
       } catch (e) {
         logger.error('draft', '进入编码阶段失败', { draft_id: draftId, error: (e as Error).message });
-        updateDraft(draftId, { status: 'draft', error: (e as Error).message });
+        updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
         broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
       }
       return;
@@ -400,7 +432,7 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
         broadcast({ type: 'draft.updated', draft_id: draftId, status: 'reviewing' });
       } catch (e) {
         logger.error('draft', '进入审查阶段失败', { draft_id: draftId, error: (e as Error).message });
-        updateDraft(draftId, { status: 'draft', error: (e as Error).message });
+        updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
         broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
       }
       return;

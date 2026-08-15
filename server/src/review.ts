@@ -61,7 +61,7 @@ export async function startReview(draftId: string): Promise<ReviewResult> {
   if (!sessionId) throw new Error('创建审核会话失败');
 
   trackSession(draftId, sessionId);
-  updateDraft(draftId, { status: 'reviewing', review_session_id: sessionId });
+  updateDraft(draftId, { status: 'reviewing', phase: 'reviewing', review_session_id: sessionId });
   logger.info('review', '开始 AI 审核', {
     draft_id: draftId,
     extension_id: draft.extension_id,
@@ -157,6 +157,8 @@ export async function settleReview(draftId: string): Promise<ReviewResult> {
   };
   updateDraft(draftId, {
     review,
+    // 审查会话已结算，流水线阶段清空（下一步由 startDebugging / 人工操作重新设置）
+    phase: null,
     // 审查通过时记录文件摘要（发布前核对，Plan 3.4）
     ...(status === 'passed' ? { review_revision: computeRevision(draftId) } : {}),
     // 无 must_fix → 可发布；有 must_fix → 保持待修复（前端展示自动修复）

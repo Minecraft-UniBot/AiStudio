@@ -67,7 +67,7 @@ export async function startDebugging(
 
   const currentRound = review?.round ?? 0;
   if (currentRound >= maxRounds) {
-    updateDraft(draftId, { status: 'failed', error: `自动修复已超过 ${maxRounds} 轮上限` });
+    updateDraft(draftId, { status: 'failed', phase: null, error: `自动修复已超过 ${maxRounds} 轮上限` });
     logger.warn('review', '超出修复轮次上限，草稿置为 failed', { draft_id: draftId, round: currentRound, max_rounds: maxRounds });
     throw new Error('已达到最大修复轮次，请在平台补充需求或重新开始');
   }
@@ -93,7 +93,7 @@ export async function startDebugging(
     trackSession(draftId, sessionId);
   }
 
-  updateDraft(draftId, { status: 'debugging', session_id: sessionId });
+  updateDraft(draftId, { status: 'debugging', phase: 'debugging', session_id: sessionId });
   logger.info('debug', '开始自动修复', {
     draft_id: draftId,
     extension_id: draft.extension_id,
@@ -171,6 +171,7 @@ export async function settleDebugging(draftId: string): Promise<DebugOutcome> {
   if (consecutiveNoProgress) {
     updateDraft(draftId, {
       status: 'failed',
+      phase: null,
       error: '自动调试连续两轮无进展，已停止修改。请补充需求或重新生成。',
       review: { ...review, rounds, status: 'failed', updated_at: new Date().toISOString() },
     });
