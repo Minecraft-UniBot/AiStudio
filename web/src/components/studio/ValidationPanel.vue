@@ -1,5 +1,5 @@
 <script setup>
-// 审查面板（三阶段流程第三阶段）：审查结果 + 重新审查 / 自动修复（Plan 3.5）
+// 审查面板（三阶段流程第三阶段）：审查结果 + 重新审查 / 自动修复 / 让 AI 修复建议（Plan 3.5）
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import AiReviewPanel from './AiReviewPanel.vue'
@@ -18,11 +18,25 @@ const review = computed(() => props.draft.review)
 const mustFixCount = computed(
   () => review.value?.issues?.filter((issue) => issue.severity === 'must_fix').length ?? 0,
 )
+const suggestionCount = computed(
+  () => review.value?.issues?.filter((issue) => issue.severity === 'suggestion').length ?? 0,
+)
 /** 审查存在 must_fix 且未在修复中 → 显示「自动修复」 */
 const canDebug = computed(
   () =>
     mustFixCount.value > 0 &&
     props.draft.status === 'reviewing' &&
+    !props.reviewing &&
+    !props.repairing,
+)
+/**
+ * 审查通过（ready）后仍有建议问题 → 显示「让 AI 修复建议」。
+ * 把审查发现的 suggestion 发给 AI 继续优化，修复后自动重新审查。
+ */
+const canFixSuggestions = computed(
+  () =>
+    suggestionCount.value > 0 &&
+    props.draft.status === 'ready' &&
     !props.reviewing &&
     !props.repairing,
 )
@@ -45,13 +59,26 @@ const canReview = computed(
         />
         {{ reviewing ? '审查中…' : '重新审查' }}
       </Button>
-      <Button v-if="canDebug" :loading="repairing" variant="warning" @click="emit('debug')">
+      <Button v-if="canDebug" :loading="repairing" variant="warning" @click="emit('debug', false)">
         <Icon
           :icon="repairing ? 'lucide:loader-2' : 'lucide:wrench'"
           width="15"
           :class="{ spin: repairing }"
         />
         {{ repairing ? '修复中…' : `自动修复（${review?.round}/${review?.max_rounds}）` }}
+      </Button>
+      <Button
+        v-if="canFixSuggestions"
+        :loading="repairing"
+        variant="secondary"
+        @click="emit('debug', true)"
+      >
+        <Icon
+          :icon="repairing ? 'lucide:loader-2' : 'lucide:sparkles'"
+          width="15"
+          :class="{ spin: repairing }"
+        />
+        {{ repairing ? '修复中…' : `让 AI 修复建议（${suggestionCount}）` }}
       </Button>
     </div>
 

@@ -19,6 +19,7 @@ import argparse
 import ast
 import importlib
 import json
+import os
 import subprocess
 import sys
 import types
@@ -97,8 +98,6 @@ def _check_syntax(ext_dir: Path) -> None:
 
 def _run_subprocess(args: list[str], cwd: Path, timeout: int = 60) -> tuple[int, str]:
     try:
-        import os
-
         proc = subprocess.run(
             args, cwd=cwd, capture_output=True, text=True, timeout=timeout,
             env={k: v for k, v in os.environ.items()},
@@ -269,6 +268,9 @@ def main() -> int:
         return 2
     except ValueError:
         pass
+    # 切换到 UniBot 根目录：Scripts.Config 等模块按相对路径（Config.toml）解析配置，
+    # 不依赖调用方 cwd（草稿工作区）
+    os.chdir(unibot_root)
     # 复用 UniBot venv：把 UniBot 根加入 sys.path 使 Scripts.* 可导入
     sys.path.insert(0, str(unibot_root))
     # 提前初始化 NoneBot 运行时，使 Scripts.Config 的 get_plugin_config 可用

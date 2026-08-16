@@ -34,6 +34,13 @@ const DEFAULT_TOOLS: ToolEntry[] = [
     note: '执行命令（默认询问，后端二次校验命令与工作目录）',
   },
   {
+    id: 'unibot_test',
+    enabled: true,
+    default_permission: 'ask',
+    phases: ['generate', 'debug'],
+    note: '在共享 UniBot 测试环境中运行校验脚本验证扩展（规划阶段不暴露）',
+  },
+  {
     id: 'web_fetch',
     enabled: true,
     default_permission: 'ask',

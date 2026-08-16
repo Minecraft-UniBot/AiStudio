@@ -67,6 +67,23 @@ export interface OpenCodeStatus {
   restarts: number;
 }
 
+/**
+ * 定位权限请求的发起会话（导出供测试）：
+ * 审核/调试会话与主会话不同，回复必须回到发起会话，否则该会话会一直阻塞等待授权。
+ * 从 opencode 待处理权限列表按 id 定位；权限已消失/列表为空时退回 fallbackSessionId。
+ */
+export function resolvePermissionTarget(
+  pending: Array<Record<string, unknown>>,
+  permissionId: string,
+  fallbackSessionId: string,
+): { sessionId: string; tool: string } {
+  const perm = pending.find((p) => p.id === permissionId);
+  return {
+    sessionId: String(perm?.sessionID ?? '') || fallbackSessionId,
+    tool: String(perm?.permission ?? ''),
+  };
+}
+
 class OpenCodeGateway {
   private process: ChildProcess | null = null;
   private port = 0;

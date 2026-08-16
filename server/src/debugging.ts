@@ -7,7 +7,7 @@
  */
 import { computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
 import { opencode } from './opencode';
-import { config, docsAllowlist, marketAllowlist } from './config';
+import { config, docsAllowlist, marketAllowlist, unibotEnvPython, validationScriptPath } from './config';
 import { trackSession } from './sessions';
 import { logger } from './logger';
 import type { ReviewIssue, ReviewResult } from './types';
@@ -21,6 +21,14 @@ const DEBUG_SYSTEM_PROMPT = `你是 UniBot 扩展修复工程师。根据审查�
 - 可只读参考扩展市场注册表（复用已有能力）：\n${marketAllowlist()}
 - 禁止使用 web_search 联网搜索本项目（UniBot、扩展开发等）内容；GitHub 公开仓库（github.com）只读参考自动放行
 - 完成后用简短中文总结修改内容`;
+
+/** 调试阶段追加的测试环境说明（只读，用于运行校验脚本验证修复） */
+function debugTestEnvNote(): string {
+  return `\n\n# 共享 UniBot 测试环境（只读，用于验证修复，禁止修改其内容）\n` +
+    `- 环境根目录：${config.unibot_env.test_dir}\n` +
+    `- 校验命令：${unibotEnvPython()} ${validationScriptPath()} <扩展目录> --unibot-root ${config.unibot_env.test_dir}\n` +
+    `- 扩展目录为草稿工作区内的扩展目录（如 <workspace>/<ExtensionId>）；运行前先确认测试环境已就绪。`;
+}
 
 export interface DebugOutcome {
   /** 本轮是否有文件变化（无进展检测依据） */
@@ -44,25 +52,36 @@ function mustFixIssues(issues: ReviewIssue[]): ReviewIssue[] {
   return issues.filter((i) => i.severity === 'must_fix');
 }
 
+/** 修复问题范围：must_fix 必选；include_suggestions 时附带 suggestion */
+export function selectIssues(issues: ReviewIssue[], includeSuggestions: boolean): ReviewIssue[] {
+  return issues.filter(
+    (i) => i.severity === 'must_fix' || (includeSuggestions && i.severity === 'suggestion'),
+  );
+}
+
 /**
- * 启动自动修复：根据审查问题单（must_fix）让主会话修改草稿。
+ * 启动自动修复：根据审查问题单让主会话修改草稿。
+ * - 默认只修复 must_fix（审查未通过时的自动修复）
+ * - include_suggestions=true 时附带 suggestion（审查通过后用户主动点「让 AI 修复建议」）
  * 修复完成后由事件层重新审查（settleAndRecheck）。
  */
 export async function startDebugging(
   draftId: string,
   issues: ReviewIssue[] | null = null,
+  options: { include_suggestions?: boolean } = {},
 ): Promise<ReviewResult> {
   const draft = readDraft(draftId);
   const review = draft.review;
   const maxRounds = config.defaults.max_review_rounds;
+  const includeSuggestions = options.include_suggestions ?? false;
 
   // 从调用方传入的问题单，或草稿现有审查问题单
-  let mustFix: ReviewIssue[];
+  let target: ReviewIssue[];
   if (issues) {
-    mustFix = issues.filter((i) => i.severity === 'must_fix');
+    target = selectIssues(issues, includeSuggestions);
   } else {
     if (!review) throw new Error('无审查结果可修复');
-    mustFix = mustFixIssues(review.issues);
+    target = selectIssues(review.issues, includeSuggestions);
   }
 
   const currentRound = review?.round ?? 0;
@@ -72,7 +91,7 @@ export async function startDebugging(
     throw new Error('已达到最大修复轮次，请在平台补充需求或重新开始');
   }
 
-  if (mustFix.length === 0) {
+  if (target.length === 0) {
     updateDraft(draftId, { status: 'ready' });
     return review!;
   }
@@ -99,12 +118,13 @@ export async function startDebugging(
     extension_id: draft.extension_id,
     round: review ? review.round + 1 : 1,
     max_rounds: maxRounds,
-    must_fix: mustFix.length,
+    issue_count: target.length,
+    include_suggestions: includeSuggestions,
     session_id: sessionId,
   });
 
   const round = review ? review.round + 1 : 1;
-  const issueList = mustFix
+  const issueList = target
     .map((i) => `- [${i.severity}] ${i.title}（${i.file ?? '未知文件'}）\n  ${i.detail}\n  建议：${i.suggestion ?? '无'}`)
     .join('\n');
   const prompt = `请修复以下审查问题（第 ${round} 轮）：\n\n${issueList}\n\n修复完成后简要说明改动。`;
@@ -113,7 +133,7 @@ export async function startDebugging(
     path: { id: sessionId },
     body: {
       parts: [{ type: 'text', text: prompt }],
-      system: DEBUG_SYSTEM_PROMPT,
+      system: DEBUG_SYSTEM_PROMPT + debugTestEnvNote(),
     },
     query: { directory: workspace },
   });
@@ -122,7 +142,7 @@ export async function startDebugging(
   if (review) {
     const rounds: ReviewRound[] = [
       ...(review.rounds ?? []),
-      { round, revision_before: prevRevision, must_fix_count: mustFix.length },
+      { round, revision_before: prevRevision, must_fix_count: target.length },
     ];
     updateDraft(draftId, {
       review: { ...review, round, rounds, updated_at: new Date().toISOString() },

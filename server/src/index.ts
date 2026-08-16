@@ -8,7 +8,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { ensureDataDirs, saveConfig, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
 import { config } from './config';
-import { opencode } from './opencode';
+import { opencode, resolvePermissionTarget } from './opencode';
 import { logger } from './logger';
 import { trackSession, untrackDraft } from './sessions';
 import {
@@ -34,6 +34,8 @@ import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPerm
 import { getTools, updateTools } from './tools';
 import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './prompts';
 import { buildSecurity } from './pipeline';
+import { ensureUnibotEnv, getUnibotEnvStatus, syncUnibotEnv } from './unibot_env';
+import { runValidation } from './validation';
 import { assertFeatureEnabled } from './registry';
 import type { DraftMeta } from './types';
 
@@ -134,7 +136,19 @@ async function handleRequest(req: Request): Promise<Response> {
       ...opencode.getStatus(),
       unibot_dir: config.unibot_dir,
       extensions_dir: config.extensions_dir,
+      unibot_env: getUnibotEnvStatus(),
     });
+  }
+
+  // ---- UniBot 测试环境（自动拉取最新源码 + uv 依赖，供校验流水线使用） ----
+  if (path === '/api/studio/unibot-env' && req.method === 'GET') {
+    return json(getUnibotEnvStatus());
+  }
+
+  if (path === '/api/studio/unibot-env/sync' && req.method === 'POST') {
+    // 后台执行同步（可能耗时数分钟），完成后通过 unibot-env.updated 事件推送；立即返回当前状态
+    void syncUnibotEnv().then((status) => broadcast({ type: 'unibot-env.updated', status }));
+    return json(getUnibotEnvStatus());
   }
 
   if (path === '/api/studio/options' && req.method === 'GET') {
@@ -418,6 +432,15 @@ async function handleRequest(req: Request): Promise<Response> {
           }
           return json([]);
         }
+        case 'check': {
+          if (req.method === 'POST') {
+            // 机械校验（在共享 UniBot 测试环境中执行，见 validation.ts）
+            const run = await runValidation(draftId);
+            broadcast({ type: 'validation.updated', draft_id: draftId, run });
+            return json(run);
+          }
+          break;
+        }
         case 'validate': {
           if (req.method === 'POST') {
             // 三阶段流程不再有独立校验：此端点改为触发「审查」（兼容旧前端调用）
@@ -439,11 +462,21 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'debug': {
           if (req.method === 'POST') {
-            // 审查发现问题后的自动修复
+            // 审查后的自动修复：
+            // - 有 must_fix → 自动修复（审查未通过）
+            // - 无 must_fix 但用户请求（include_suggestions）→ 附带 suggestion 一起修
+            const body = (await req.json().catch(() => ({}))) as { include_suggestions?: boolean };
             const current = readDraft(draftId);
             const reviewMustFix = current.review?.issues?.filter((i) => i.severity === 'must_fix');
+            const reviewSuggestions = current.review?.issues?.filter(
+              (i) => i.severity === 'suggestion',
+            );
             if (reviewMustFix?.length) {
               const review = await startDebugging(draftId);
+              return json(review);
+            }
+            if (body.include_suggestions && reviewSuggestions?.length) {
+              const review = await startDebugging(draftId, null, { include_suggestions: true });
               return json(review);
             }
             return errorJson('没有需要修复的问题', 1, 400);
@@ -518,21 +551,26 @@ async function handleRequest(req: Request): Promise<Response> {
       return errorJson('response 必须是 once / always / reject');
     }
     try {
-      // 安全约束（Plan 8.1）：bash 等危险命令的 always 降级为 once；
-      // 其余工具（read / edit / todowrite…）尊重 always——真正"本草稿始终允许"。
-      let decision = response;
-      if (response === 'always') {
-        const pending = await opencode.listPendingPermissions(draftWorkspace(draftId!));
-        const tool = String(pending.find((p) => p.id === permissionId)?.permission ?? '');
-        if (tool === 'bash') decision = 'once';
-      }
+      // 权限请求可能来自主会话、审核会话或调试会话：必须回复到发起请求的会话，
+      // 否则审核/调试会话会一直阻塞等待授权，草稿永远停在 reviewing。
+      // 从 opencode 待处理权限列表中按 id 定位发起会话（列表为空/权限已消失时退回主会话）。
+      const pending = await opencode.listPendingPermissions(draftWorkspace(draftId!));
+      const { sessionId, tool } = resolvePermissionTarget(pending, permissionId!, draft.session_id!);
+      const decision = response === 'always' && tool === 'bash' ? 'once' : response;
       await opencode
         .getClient()
         .postSessionIdPermissionsPermissionId({
-          path: { id: draft.session_id!, permissionID: permissionId! },
+          path: { id: sessionId, permissionID: permissionId! },
           body: { response: decision as 'once' | 'always' | 'reject' },
           query: { directory: draftWorkspace(draftId!) },
         });
+      logger.info('permission', '回复权限请求', {
+        draft_id: draftId,
+        permission_id: permissionId,
+        session_id: sessionId,
+        tool,
+        response: decision,
+      });
       broadcast({ type: 'permission.replied', draft_id: draftId!, permission_id: permissionId! });
       return json({ ok: true });
     } catch (e) {
@@ -695,6 +733,10 @@ const server = Bun.serve({
 
 ensureDataDirs();
 await opencode.start();
+
+// 后台拉取 UniBot 测试环境（不阻塞启动：可能耗时数分钟；状态通过
+// /api/studio/unibot-env 查询，完成后广播 unibot-env.updated）
+void ensureUnibotEnv();
 
 // 恢复已存在草稿的会话登记（必须在事件订阅启动之前，
 // 否则订阅协调循环看不到这些工作区）

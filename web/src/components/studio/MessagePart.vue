@@ -3,7 +3,7 @@
 // parts 统一经 utils/opencode_parts.js 归一化，不直接依赖 OpenCode 原始字段
 import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import { normalize_parts, tool_status, tool_label, tool_result, format_duration } from '@/utils/opencode_parts'
+import { normalize_parts, tool_status, tool_label, tool_result, format_duration, checkpoint_of } from '@/utils/opencode_parts'
 import { render_markdown } from '@/utils/markdown'
 
 const props = defineProps({
@@ -16,6 +16,8 @@ const isUser = computed(() => props.message.info?.role === 'user')
 const messageId = computed(() => props.message.info?.id ?? '')
 const parts = computed(() => normalize_parts(props.message))
 const summary = computed(() => props.message.info?.summary?.body ?? '')
+/** 编排检查点（系统注入的阶段提示词消息 → 分割线，可回滚） */
+const checkpoint = computed(() => checkpoint_of(props.message))
 
 /** 用户手动展开的工具调用（按 part.id 或下标），完成/失败默认收起，点击头部切换 */
 const expanded_tools = ref(new Set())
@@ -131,7 +133,23 @@ function todo_priority_class(priority) {
 </script>
 
 <template>
-  <div class="message" :class="{ user: isUser }">
+  <!-- 编排检查点：系统注入的阶段提示词 → 分割线，仅显示「进入…阶段」，悬停可回滚 -->
+  <div v-if="checkpoint" class="checkpoint">
+    <button
+      class="checkpoint-revert"
+      title="回退到进入该阶段之前（撤销此阶段全部改动，重新执行）"
+      @click="emit('revert', messageId)"
+    >
+      <Icon icon="lucide:rotate-ccw" width="14" />
+    </button>
+    <span class="checkpoint-line" />
+    <span class="checkpoint-label">
+      <Icon icon="lucide:flag" width="11" />
+      {{ checkpoint.label }}
+    </span>
+    <span class="checkpoint-line" />
+  </div>
+  <div v-else class="message" :class="{ user: isUser }">
     <div class="avatar">
       <Icon :icon="isUser ? 'lucide:user' : 'lucide:bot'" width="15" />
     </div>
@@ -313,6 +331,67 @@ function todo_priority_class(priority) {
 </template>
 
 <style scoped>
+/* ---------- 编排检查点：分割线 ---------- */
+.checkpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  user-select: none;
+}
+
+.checkpoint-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border) 10%, var(--border) 90%, transparent);
+}
+
+.checkpoint-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.checkpoint-label :deep(svg) {
+  color: var(--text-muted);
+}
+
+.checkpoint-revert {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  box-shadow: var(--shadow);
+  transition:
+    opacity var(--transition),
+    color var(--transition),
+    background-color var(--transition),
+    border-color var(--transition);
+}
+
+.checkpoint:hover .checkpoint-revert,
+.checkpoint-revert:focus-visible {
+  opacity: 1;
+}
+
+.checkpoint-revert:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
 .message {
   display: flex;
   gap: var(--space-3);

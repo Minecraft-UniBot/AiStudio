@@ -17,8 +17,8 @@ import type { ReviewIssue, ReviewResult } from './types';
 /** 审核阶段只读工具（对应 Plan 7.2：审核阶段禁用 edit/bash） */
 const REVIEW_TOOLS = toolsForPhase('review');
 
-/** 解析审核 AI 的结构化输出 */
-function parseReviewOutput(text: string): { summary: string; issues: ReviewIssue[] } {
+/** 解析审核 AI 的结构化输出（导出供测试） */
+export function parseReviewOutput(text: string): { summary: string; issues: ReviewIssue[] } {
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('无 JSON');
@@ -61,7 +61,22 @@ export async function startReview(draftId: string): Promise<ReviewResult> {
   if (!sessionId) throw new Error('创建审核会话失败');
 
   trackSession(draftId, sessionId);
-  updateDraft(draftId, { status: 'reviewing', phase: 'reviewing', review_session_id: sessionId });
+  // 写入「审查中」占位审核结果：清空旧问题单（上一轮 must_fix 不应在审查进行中
+  // 继续显示「自动修复」，否则用户会误触并发起调试）；保留轮次历史供无进展熔断。
+  updateDraft(draftId, {
+    status: 'reviewing',
+    phase: 'reviewing',
+    review_session_id: sessionId,
+    review: {
+      round: draft.review?.round ?? 0,
+      max_rounds: config.defaults.max_review_rounds,
+      status: 'needs_confirmation',
+      issues: [],
+      summary: '审核进行中…',
+      rounds: draft.review?.rounds ?? [],
+      updated_at: new Date().toISOString(),
+    },
+  });
   logger.info('review', '开始 AI 审核', {
     draft_id: draftId,
     extension_id: draft.extension_id,
@@ -142,6 +157,12 @@ export async function settleReview(draftId: string): Promise<ReviewResult> {
         .join('\n'),
     )
     .join('\n');
+
+  // 审核会话没有输出（消息尚未落盘 / 会话异常）：视为结算失败抛错，
+  // 由调用方把草稿移出 reviewing 并给出可重试提示，而不是生成伪造的 must_fix。
+  if (!assistantText.trim()) {
+    throw new Error('审核会话没有输出内容，请稍后重试审查');
+  }
 
   const { summary, issues } = parseReviewOutput(assistantText);
   const mustFix = issues.filter((i) => i.severity === 'must_fix');

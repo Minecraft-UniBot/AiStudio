@@ -104,6 +104,10 @@ function doPublish(draftId: string, extensionId: string): PublishRecord {
   if (!draft.review || draft.review.status !== 'passed') {
     throw new PublishError('审查未通过，无法发布', 'REVIEW_FAILED');
   }
+  // 机械校验必须通过且文件摘要与校验时一致（Plan 3.4：检查通过后文件又变化则锁定发布）
+  if (draft.validation?.status !== 'passed' || draft.validation_revision !== current) {
+    throw new PublishError('机械校验未通过或文件已变更，请重新检查后再发布', 'VALIDATION_STALE');
+  }
 
   // 2. 目标目录必须不存在（第一版拒绝覆盖）
   const target = join(config.extensions_dir, extensionId);

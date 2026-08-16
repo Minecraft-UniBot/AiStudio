@@ -41,6 +41,13 @@ function loadConfig(): StudioConfig {
       version: '1.18.4',
       data_dir: join(dataDir, 'opencode'),
     },
+    unibot_env: {
+      repo_owner: process.env.UNIBOT_REPO_OWNER ?? 'MineJPGcraft',
+      repo_name: process.env.UNIBOT_REPO_NAME ?? 'UniBot',
+      release_asset: 'UniBot.zip',
+      fallback_tag: 'v1.0.1',
+      test_dir: join(dataDir, 'unibot'),
+    },
     features: {
       review: true,
       mc_test_environment: false,
@@ -67,6 +74,7 @@ function loadConfig(): StudioConfig {
     ...base,
     ...disk,
     opencode: { ...base.opencode, ...(disk.opencode ?? {}) },
+    unibot_env: { ...base.unibot_env, ...(disk.unibot_env ?? {}) },
     features: { ...base.features, ...(disk.features ?? {}) },
     defaults: { ...base.defaults, ...(disk.defaults ?? {}) },
     auth: { ...base.auth, ...(disk.auth ?? {}) },
@@ -98,6 +106,7 @@ export function saveConfig(patch: Partial<StudioConfig>): StudioConfig {
     ...config,
     ...patch,
     opencode: { ...config.opencode, ...(patch.opencode ?? {}) },
+    unibot_env: { ...config.unibot_env, ...(patch.unibot_env ?? {}) },
     features: { ...config.features, ...(patch.features ?? {}) },
     defaults: { ...config.defaults, ...(patch.defaults ?? {}) },
     auth: { ...config.auth, ...(patch.auth ?? {}) },
@@ -157,6 +166,24 @@ export function marketAllowlist(): string {
   return marketAllowlistPaths().map((p) => `  - ${p}`).join('\n');
 }
 
+/**
+ * UniBot 测试环境（config.unibot_env.test_dir）的 venv Python 可执行路径。
+ * 供编码/调试阶段 AI 在隔离测试环境里运行校验脚本验证扩展（见 tools.ts 的 unibot_test）。
+ */
+export function unibotEnvPython(): string {
+  return join(
+    config.unibot_env.test_dir,
+    '.venv',
+    process.platform === 'win32' ? 'Scripts' : 'bin',
+    process.platform === 'win32' ? 'python.exe' : 'python',
+  );
+}
+
+/** UniBot 校验脚本绝对路径（server/validation/validate_extension.py） */
+export function validationScriptPath(): string {
+  return join(import.meta.dir, '..', 'validation', 'validate_extension.py');
+}
+
 /** 初始化平台数据目录结构 */
 export function ensureDataDirs() {
   for (const dir of [
@@ -164,6 +191,7 @@ export function ensureDataDirs() {
     join(config.data_dir, 'logs'),
     join(config.data_dir, 'opencode'),
     join(config.data_dir, 'config'),
+    config.unibot_env.test_dir,
   ]) {
     mkdirSync(dir, { recursive: true });
   }

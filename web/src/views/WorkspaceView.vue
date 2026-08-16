@@ -1,7 +1,7 @@
 <script setup>
 // AI 开发工作台：左栏文件树 / 中栏对话 / 右栏结果与检查（Plan 3.2）
 // 桌面三栏（可折叠、可拖拽），手机端单栏 Tabs
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useStudioStore } from '@/stores/studio'
@@ -92,10 +92,18 @@ const primaryAction = computed(() => {
 })
 
 // ===== 文件树 =====
+// store.files 由实时事件 / 刷新动作驱动更新（见 use_studio_events.js），
+// 这里做响应式映射，保证文件树随后端文件变化实时刷新
+watch(
+  () => store.files,
+  (files) => {
+    fileSizes.value = Object.fromEntries(files.map((file) => [file.path, file.size]))
+    fileTree.value = buildTree(files.map((file) => file.path))
+  },
+)
+
 async function loadFiles() {
-  const files = await store.fetchFiles(draftId)
-  fileSizes.value = Object.fromEntries(files.map((file) => [file.path, file.size]))
-  fileTree.value = buildTree(files.map((file) => file.path))
+  await store.fetchFiles(draftId)
 }
 
 function buildTree(paths) {
@@ -207,10 +215,10 @@ async function review() {
   }
 }
 
-async function autoFix() {
+async function autoFix(includeSuggestions = false) {
   repairing.value = true
   try {
-    await store.startDebug(draftId)
+    await store.startDebug(draftId, { include_suggestions: includeSuggestions })
     await store.fetchDraft(draftId)
   } catch (e) {
     toast_error(e.message)
@@ -278,6 +286,33 @@ async function confirmRevert() {
 
 onMounted(async () => {
   await refreshAll()
+})
+
+// ===== 审查中轮询 =====
+// 后端结算审查结果依赖 SSE 事件；若 WebSocket 短暂断开或事件丢失，
+// UI 可能一直显示「审查中」。审查进行期间定期拉取草稿状态兜底。
+const REVIEW_POLL_MS = 8000
+let review_poll = null
+
+watch(
+  () => draft.value?.status,
+  (status) => {
+    if (status === 'reviewing' && !review_poll) {
+      review_poll = setInterval(() => {
+        store.fetchDraft(draftId).catch(() => {})
+      }, REVIEW_POLL_MS)
+    } else if (status !== 'reviewing' && review_poll) {
+      clearInterval(review_poll)
+      review_poll = null
+    }
+  },
+)
+
+onUnmounted(() => {
+  if (review_poll) {
+    clearInterval(review_poll)
+    review_poll = null
+  }
 })
 </script>
 

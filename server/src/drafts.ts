@@ -287,13 +287,24 @@ export function resolveDraftPath(draftId: string, rel: string): string {
   return candidate;
 }
 
-/** 递归列出草稿文件树（供左栏展示与摘要计算） */
+/** 文件树/摘要需要忽略的缓存与隐藏条目（与发布过滤一致，见 publishing.ts） */
+function isIgnoredEntry(name: string): boolean {
+  return name === '__pycache__' || name.startsWith('.');
+}
+
+/**
+ * 递归列出草稿文件树（供左栏展示与摘要计算）。
+ * 跳过 `__pycache__` 等缓存目录与以 `.` 开头的隐藏条目（.git / .pytest_cache /
+ * .mypy_cache / .DS_Store 等）：它们不应出现在文件树里，也不应计入文件摘要
+ * （否则跑一次测试产生的缓存就会让审查/发布摘要失效）。
+ */
 export function listFiles(draftId: string): string[] {
   const root = draftWorkspace(draftId);
   if (!existsSync(root)) return [];
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
+      if (isIgnoredEntry(entry)) continue;
       const full = join(dir, entry);
       const st = lstatSync(full);
       if (st.isSymbolicLink()) continue;

@@ -82,19 +82,57 @@ const placeholder = computed(() =>
   props.busy ? 'AI 正在处理中…' : '继续描述需求、提出修改，或询问扩展用法…（Enter 发送，Shift+Enter 换行）',
 )
 
+/** 距底部多少像素内视为「在底部」 */
+const BOTTOM_THRESHOLD = 56
+
+const near_bottom = ref(true)
+let follow_timer = null
+
+function is_near_bottom() {
+  const el = scrollEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD
+}
+
 function scrollToBottom() {
   nextTick(() => {
     scrollEl.value?.scrollTo({ top: scrollEl.value.scrollHeight, behavior: 'smooth' })
   })
 }
 
+/** 用户离开底部后保持不打扰；若 5s 无任何滚动操作（没动静），再自动滚到底部 */
+function arm_follow_timer() {
+  if (follow_timer) return // 已在计时，只等用户 5s 无动静
+  follow_timer = setTimeout(() => {
+    follow_timer = null
+    if (!near_bottom.value) scrollToBottom()
+  }, 5000)
+}
+
+function cancel_follow_timer() {
+  clearTimeout(follow_timer)
+  follow_timer = null
+}
+
+/** 用户主动滚动：更新是否在底部，并取消待执行的自动滚动 */
+function onScroll() {
+  near_bottom.value = is_near_bottom()
+  cancel_follow_timer()
+}
+
+// 滚动跟随：新消息追加，或最后一条消息内容更新（工具输出 / 文本流式刷新）时
+// - 用户在底部 → 立即滚动
+// - 用户不在底部（正在看历史）→ 不打扰；5s 没动静再滚到底部
 watch(
-  () => props.messages.length,
-  () => scrollToBottom(),
+  () => props.messages[props.messages.length - 1],
+  () => {
+    if (near_bottom.value) scrollToBottom()
+    else arm_follow_timer()
+  },
 )
 
 onMounted(scrollToBottom)
-onUnmounted(() => {})
+onUnmounted(cancel_follow_timer)
 
 async function send() {
   const text = input.value.trim()
@@ -119,7 +157,7 @@ function onKeydown(e) {
 
 <template>
   <main class="conversation-panel">
-    <div ref="scrollEl" class="message-scroll">
+    <div ref="scrollEl" class="message-scroll" @scroll="onScroll">
       <!-- 消息流 -->
       <EmptyState
         v-if="messages.length === 0"
@@ -258,19 +296,75 @@ function onKeydown(e) {
   gap: var(--space-2);
 }
 
+/* ---------- 待处理授权 / 提问：固定在输入框上方的处理条 ---------- */
+.pending-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 45%;
+  background: var(--surface-sunken);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 16px rgb(0 0 0 / 0.05);
+  z-index: 1;
+}
+
+.pending-bar-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pending-bar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+  animation: pending-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(217 119 6 / 0.35);
+  }
+  50% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 5px rgb(217 119 6 / 0);
+  }
+}
+
+.pending-list {
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .pending-item {
-  margin-bottom: var(--space-2);
+  flex-shrink: 0;
 }
 
 .question-card {
-  border: 1px solid var(--accent-soft);
-  background: var(--accent-soft);
-  border-radius: var(--radius-md);
+  border: 1px solid #c7d7f7;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 78%);
+  border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  box-shadow: var(--shadow);
+  box-shadow: 0 2px 8px rgb(37 99 235 / 0.07);
 }
 
 .q-head {
@@ -279,6 +373,19 @@ function onKeydown(e) {
   gap: var(--space-2);
   font-size: var(--text-sm);
   font-weight: 600;
+  color: var(--accent);
+}
+
+.q-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  border: 1px solid #dbe7fd;
+  flex-shrink: 0;
   color: var(--accent);
 }
 
@@ -312,9 +419,8 @@ function onKeydown(e) {
 
 .q-option-btn {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -324,17 +430,53 @@ function onKeydown(e) {
   color: var(--text);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--transition), background-color var(--transition), box-shadow var(--transition);
+  transition:
+    border-color var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
 }
 
 .q-option-btn:hover {
   border-color: var(--border-strong);
+  background: var(--surface-sunken);
 }
 
 .q-option-btn.selected {
   border-color: var(--accent);
   background: var(--accent-soft);
   box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* 单选指示点 */
+.q-radio {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  flex-shrink: 0;
+  transition:
+    border-color var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.q-option-btn:hover .q-radio {
+  border-color: var(--accent);
+}
+
+.q-option-btn.selected .q-radio {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface);
+}
+
+.q-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .q-option-label {
@@ -369,6 +511,7 @@ function onKeydown(e) {
   gap: var(--space-2);
   flex-wrap: wrap;
   justify-content: flex-end;
+  padding-top: 2px;
 }
 
 /* ---------- 输入区 ---------- */

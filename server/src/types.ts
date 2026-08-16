@@ -157,6 +157,8 @@ export type StudioEvent =
   | { type: 'question.rejected'; draft_id: string; question_id: string }
   | { type: 'draft.updated'; draft_id: string; status: DraftStatus }
   | { type: 'review.updated'; draft_id: string; review: ReviewResult }
+  | { type: 'validation.updated'; draft_id: string; run: ValidationRun }
+  | { type: 'unibot-env.updated'; status: UnibotEnvStatus }
   | { type: 'draft.published'; draft_id: string };
 
 /** OpenCode permission 请求（归一化后的最小字段） */
@@ -217,6 +219,22 @@ export interface ToolEntry {
   note?: string;
 }
 
+/** UniBot 测试环境状态（共享一份，供校验流水线使用） */
+export interface UnibotEnvStatus {
+  /** missing：未就绪；downloading：下载中；installing：解压/装依赖中；ready：可用；error：失败 */
+  state: 'missing' | 'downloading' | 'installing' | 'ready' | 'error';
+  /** 测试环境根目录（<data_dir>/unibot） */
+  path: string;
+  /** 源码版本（pyproject.toml 的 [project].version） */
+  version: string | null;
+  /** 来源 GitHub release tag */
+  tag: string | null;
+  /** venv 是否就绪（.venv/bin/python 存在） */
+  venv_ready: boolean;
+  error: string | null;
+  updated_at: string | null;
+}
+
 /** 平台配置（config/studio.json） */
 export interface StudioConfig {
   data_dir: string;
@@ -228,6 +246,19 @@ export interface StudioConfig {
     bin: string;
     version: string;
     data_dir: string;
+  };
+  /** UniBot 测试环境：GitHub Releases 来源与本地目录 */
+  unibot_env: {
+    /** release 仓库 owner（如 MineJPGcraft） */
+    repo_owner: string;
+    /** release 仓库名（如 UniBot） */
+    repo_name: string;
+    /** 发布资产文件名（如 UniBot.zip） */
+    release_asset: string;
+    /** 无法访问 GitHub API 时回退的固定 tag（如 v1.0.1） */
+    fallback_tag: string;
+    /** 测试环境目录（共享一份，不随草稿复制） */
+    test_dir: string;
   };
   features: {
     review: boolean;

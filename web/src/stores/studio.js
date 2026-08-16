@@ -4,6 +4,18 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/utils/api'
 
+// 请求序号守卫：流式事件会高频触发消息/草稿/文件全量拉取，并发请求可能乱序返回。
+// 只应用「最后一次发起」的响应，旧快照不得覆盖新状态（否则会丢消息段 / 回退到旧草稿状态）。
+const fetch_seq = { draft: 0, messages: 0, files: 0, diff: 0, todo: 0 }
+
+/** 拉取并应用 state，仅当本次请求仍是最新一次发起时写入（乱序旧响应直接丢弃） */
+async function guarded_fetch(kind, getter, setter) {
+  const seq = ++fetch_seq[kind]
+  const data = await getter()
+  if (seq === fetch_seq[kind]) setter(data)
+  return data
+}
+
 export const useStudioStore = defineStore('studio', () => {
   const status = ref(null)
   const drafts = ref([])
@@ -47,8 +59,13 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function fetchDraft(id) {
-    currentDraft.value = await api(`/drafts/${id}`)
-    return currentDraft.value
+    return guarded_fetch(
+      'draft',
+      () => api(`/drafts/${id}`),
+      (data) => {
+        currentDraft.value = data
+      },
+    )
   }
 
   async function removeDraft(id) {
@@ -58,8 +75,13 @@ export const useStudioStore = defineStore('studio', () => {
 
   // ---- 会话 ----
   async function fetchMessages(id) {
-    messages.value = await api(`/drafts/${id}/messages`)
-    return messages.value
+    return guarded_fetch(
+      'messages',
+      () => api(`/drafts/${id}/messages`),
+      (data) => {
+        messages.value = data
+      },
+    )
   }
 
   async function sendPrompt(id, text) {
@@ -79,19 +101,34 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   async function fetchDiff(id) {
-    diff.value = await api(`/drafts/${id}/diff`)
-    return diff.value
+    return guarded_fetch(
+      'diff',
+      () => api(`/drafts/${id}/diff`),
+      (data) => {
+        diff.value = data
+      },
+    )
   }
 
   async function fetchTodo(id) {
-    todo.value = await api(`/drafts/${id}/todo`)
-    return todo.value
+    return guarded_fetch(
+      'todo',
+      () => api(`/drafts/${id}/todo`),
+      (data) => {
+        todo.value = data
+      },
+    )
   }
 
   // ---- 文件 ----
   async function fetchFiles(id) {
-    files.value = await api(`/drafts/${id}/files`)
-    return files.value
+    return guarded_fetch(
+      'files',
+      () => api(`/drafts/${id}/files`),
+      (data) => {
+        files.value = data
+      },
+    )
   }
 
   async function fetchFileContent(id, path) {
@@ -108,8 +145,8 @@ export const useStudioStore = defineStore('studio', () => {
     return await api(`/drafts/${id}/review`)
   }
 
-  async function startDebug(id) {
-    return await api(`/drafts/${id}/debug`, { method: 'POST' })
+  async function startDebug(id, options = {}) {
+    return await api(`/drafts/${id}/debug`, { method: 'POST', body: options })
   }
 
   async function publish(id) {
@@ -152,12 +189,16 @@ export const useStudioStore = defineStore('studio', () => {
 
   // ---- 状态刷新 ----
   async function refreshCurrent(id) {
-    const before = currentDraft.value?.review_revision
-    currentDraft.value = await api(`/drafts/${id}`)
-    // 审查结果或摘要变化时刷新消息与文件
-    if (before !== currentDraft.value?.review_revision) {
-      fetchMessages(id).catch(() => {})
-      fetchFiles(id).catch(() => {})
+    try {
+      const before = currentDraft.value?.review_revision
+      await fetchDraft(id)
+      // 审查结果或摘要变化时刷新消息与文件
+      if (before !== currentDraft.value?.review_revision) {
+        fetchMessages(id).catch(() => {})
+        fetchFiles(id).catch(() => {})
+      }
+    } catch {
+      // 刷新失败保持旧状态（后续事件会继续触发刷新）
     }
   }
 

@@ -15,6 +15,28 @@ export function normalize_parts(message) {
   return parts.map(normalize_part).filter(Boolean)
 }
 
+/**
+ * 编排检查点识别：编排系统（后端流水线）会以 promptAsync 把各阶段的提示词
+ * （规划 / 编码 / 调试 / 审查）注入会话，表现为 role=user 的长文本消息。
+ * 这些提示词统一经 renderPromptWithSecurity 追加「后端安全约束」尾部，
+ * 特征稳定，据此识别并折叠为「进入…阶段」的分割线检查点。
+ * 返回 { stage, label }；非检查点消息返回 null。
+ */
+export function checkpoint_of(message) {
+  if (!message || message?.info?.role !== 'user') return null
+  const text = (message.parts ?? [])
+    .filter((p) => p?.type === 'text')
+    .map((p) => String(p.text ?? ''))
+    .join('\n')
+  if (!text.includes('后端安全约束')) return null
+  // 阶段识别：按各阶段提示词正文特征（模板可编辑，用宽松关键词兜底）
+  if (/第二阶段|实现编码/.test(text)) return { stage: 'coding', label: '进入编码阶段' }
+  if (/修复工程师|问题单/.test(text)) return { stage: 'debugging', label: '进入修复阶段' }
+  if (/审查员|第三阶段|只读审查/.test(text)) return { stage: 'reviewing', label: '进入审查阶段' }
+  if (/第一阶段|需求规划/.test(text)) return { stage: 'planning', label: '进入规划阶段' }
+  return { stage: '', label: '编排检查点' }
+}
+
 /** 归一化单个 part；无法识别的类型返回 null */
 export function normalize_part(part) {
   if (!part || typeof part !== 'object') return null

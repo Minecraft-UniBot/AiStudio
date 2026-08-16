@@ -13,13 +13,14 @@ import type { ServerWebSocket } from 'bun';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { opencode } from './opencode';
-import { readDraft, updateDraft, draftWorkspace } from './drafts';
+import { readDraft, updateDraft, draftWorkspace, listDrafts } from './drafts';
 import { settleDebugging } from './debugging';
 import { settleReview, startReview } from './review';
+import { runValidation } from './validation';
 import { startCoding } from './pipeline';
 import { draftIdForSession, getWorkspaces } from './sessions';
 import { logger } from './logger';
-import { docsAllowlistPaths, marketAllowlistPaths } from './config';
+import { docsAllowlistPaths, marketAllowlistPaths, unibotEnvPython, validationScriptPath } from './config';
 import type { PermissionRequest, QuestionRequest, StudioEvent } from './types';
 
 const WS_CLIENTS = new Set<ServerWebSocket<unknown>>();
@@ -80,6 +81,13 @@ function matchesDocsAllowlist(permission: PermissionRequest): boolean {
     const target =
       permission.description || String(permission.metadata?.url ?? permission.metadata?.filepath ?? '');
     return /github\.com/.test(target);
+  }
+  // 共享 UniBot 测试环境校验命令（bash 调用测试环境 venv python + 校验脚本，只读验证扩展）
+  if (tool === 'bash') {
+    const command = permission.description || String(permission.metadata?.command ?? '');
+    const python = unibotEnvPython();
+    const script = validationScriptPath();
+    return command.includes(python) && command.includes(script);
   }
   if (tool !== 'read' && tool !== 'external_directory') return false;
   const allowlist = [...docsAllowlistPaths(), ...marketAllowlistPaths()];
@@ -360,6 +368,127 @@ async function settleAndRecheck(draftId: string) {
 const LAST_IDLE = new Map<string, number>();
 const IDLE_DEDUP_MS = 2000;
 
+/**
+ * 审查结算（导出供测试）：结算审核会话结果并推进草稿状态。
+ * - SSE 路径与协调循环 reconcile 都走这里，短窗口内只结算一次（冷却去重）
+ * - 结算失败（opencode 瞬时错误 / 会话异常 / 无输出）不再把草稿留在 reviewing：
+ *   置回 draft 并附错误信息，用户可一键「重新审查」，避免永久卡在审查中
+ */
+const REVIEW_SETTLED_AT = new Map<string, number>();
+const REVIEW_SETTLE_COOLDOWN_MS = 8000;
+/** draftId -> 已成功结算的审核会话 id：must_fix 等待修复时会话仍 idle，
+ *  reconcile 靠它区分「已结算等待处理」与「idle 事件丢失未结算」，避免循环重结算 */
+const REVIEW_SETTLED_SESSION = new Map<string, string>();
+
+export async function settleReviewAndAdvance(draftId: string): Promise<void> {
+  const now = Date.now();
+  const last = REVIEW_SETTLED_AT.get(draftId) ?? 0;
+  if (now - last < REVIEW_SETTLE_COOLDOWN_MS) return;
+  REVIEW_SETTLED_AT.set(draftId, now);
+  try {
+    const result = await settleReview(draftId);
+    const after = readDraft(draftId);
+    REVIEW_SETTLED_SESSION.set(draftId, after.review_session_id ?? '');
+    logger.info('review', `审查完成`, {
+      draft_id: draftId,
+      extension_id: after.extension_id,
+      status: result.status,
+      issues: result.issues.length,
+      must_fix: result.issues.filter((i) => i.severity === 'must_fix').length,
+    });
+    broadcast({ type: 'review.updated', draft_id: draftId, review: result });
+    if (result.status === 'passed') {
+      // 审查通过后自动执行机械校验（在共享 UniBot 测试环境中，见 validation.ts），
+      // 校验通过才允许发布；失败则回到 draft 等待修复。
+      try {
+        const run = await runValidation(draftId);
+        broadcast({ type: 'validation.updated', draft_id: draftId, run });
+        if (run.status === 'passed') {
+          updateDraft(draftId, { status: 'ready' });
+        } else {
+          const failedNames = run.steps
+            .filter((step) => step.status === 'failed')
+            .map((step) => step.name)
+            .join('、');
+          updateDraft(draftId, {
+            status: 'draft',
+            error: `机械校验未通过：${failedNames}（详见检查结果）`,
+          });
+        }
+      } catch (validationError) {
+        logger.error('validation', '审查后机械校验执行失败', {
+          draft_id: draftId,
+          error: (validationError as Error).message,
+        });
+        updateDraft(draftId, {
+          status: 'draft',
+          error: `机械校验失败：${(validationError as Error).message}`,
+        });
+      }
+      broadcast({ type: 'draft.updated', draft_id: draftId, status: readDraft(draftId).status });
+    } else {
+      broadcast({ type: 'draft.updated', draft_id: draftId, status: after.status });
+    }
+  } catch (e) {
+    logger.error('review', '审查结算失败，草稿回到 draft（可重试审查）', {
+      draft_id: draftId,
+      error: (e as Error).message,
+    });
+    let current;
+    try {
+      current = readDraft(draftId);
+    } catch {
+      return; // 草稿已删除
+    }
+    if (current.status === 'reviewing') {
+      updateDraft(draftId, {
+        status: 'draft',
+        phase: null,
+        error: `审查结算失败：${(e as Error).message}（可点击「重新审查」重试）`,
+      });
+      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+    }
+  }
+}
+
+/**
+ * 审查状态调和（协调循环兜底）：
+ * 若审查会话已空闲但草稿仍停在 reviewing（SSE idle 事件丢失 / 订阅断开的间隙 /
+ * 结算异常被上方兜底误判），按 /session/status 主动结算，避免「一直显示审查中」。
+ */
+async function reconcileReviewing(): Promise<void> {
+  let drafts;
+  try {
+    drafts = listDrafts();
+  } catch {
+    return;
+  }
+  for (const draft of drafts) {
+    if (draft.status !== 'reviewing' || !draft.review_session_id) continue;
+    // 该审核会话已成功结算过（如 must_fix 等待用户点「自动修复」）→ 跳过，避免循环重结算
+    if (REVIEW_SETTLED_SESSION.get(draft.id) === draft.review_session_id) continue;
+    try {
+      const client = opencode.getClient();
+      const res = await client.session.status({
+        query: { directory: draftWorkspace(draft.id) },
+      });
+      const statuses = (res.data ?? {}) as Record<string, { type?: string }>;
+      if (statuses[draft.review_session_id]?.type === 'idle') {
+        logger.info('events', '调和：审查会话已空闲但未结算，主动结算', {
+          draft_id: draft.id,
+          review_session_id: draft.review_session_id,
+        });
+        await settleReviewAndAdvance(draft.id);
+      }
+    } catch (e) {
+      logger.debug('events', '审查状态调和失败（忽略）', {
+        draft_id: draft.id,
+        error: (e as Error).message,
+      });
+    }
+  }
+}
+
 async function settleSessionState(draftId: string, sessionId: string, ev: StudioEvent) {
   if (ev.type === 'session.error') {
     // 主动中止（停止按钮 / abort 接口）会触发 opencode 的 MessageAbortedError，
@@ -450,21 +579,7 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
 
   // 审查会话完成 → 结算审查结果
   if (sessionId === draft.review_session_id) {
-    try {
-      const result = await settleReview(draftId);
-      const after = readDraft(draftId);
-      logger.info('review', `审查完成`, {
-        draft_id: draftId,
-        extension_id: draft.extension_id,
-        status: result.status,
-        issues: result.issues.length,
-        must_fix: result.issues.filter((i) => i.severity === 'must_fix').length,
-      });
-      broadcast({ type: 'review.updated', draft_id: draftId, review: result });
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: after.status });
-    } catch (e) {
-      logger.error('review', `审查结算失败`, { draft_id: draftId, error: (e as Error).message });
-    }
+    await settleReviewAndAdvance(draftId);
   }
 }
 
@@ -501,7 +616,9 @@ async function subscribeWorkspace(workspace: string) {
             if (!granted) return;
           }
           await settleSessionState(draftId, sessionId, ev);
-          broadcast({ ...ev, draft_id: draftId });
+          // normalize 产出的事件全部与草稿相关；unibot-env.updated 由 index.ts 直接广播，
+          // 不会经过此处（联合类型含该无 draft_id 成员，此处显式收窄）
+          broadcast({ ...ev, draft_id: draftId } as StudioEvent);
         },
         onSseError: (error) => {
           if (!ac.signal.aborted) {
@@ -550,6 +667,8 @@ export async function startEventConsumer() {
     for (const workspace of wanted) {
       subscribeWorkspace(workspace);
     }
+    // 兜底：审查会话已空闲但结算被漏掉的草稿（SSE 间隙 / 事件丢失）
+    await reconcileReviewing();
     await Bun.sleep(2000);
   }
 }

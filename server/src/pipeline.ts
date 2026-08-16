@@ -7,7 +7,14 @@ import { join } from 'node:path';
 import { draftWorkspace, readDraft, updateDraft, DraftError } from './drafts';
 import { opencode } from './opencode';
 import { logger } from './logger';
-import { docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
+import {
+  config,
+  docsAllowlist,
+  marketAllowlist,
+  marketRegistryPath,
+  unibotEnvPython,
+  validationScriptPath,
+} from './config';
 import { renderPromptWithSecurity } from './prompts';
 import { renderSkillsSection } from './skills';
 
@@ -22,6 +29,10 @@ export function buildSecurity(workspace: string): string {
       '其余联网（web_search / 第三方文档等）需先说明目的并等待用户确认。',
     '6. 涉及 shell 命令时，先说明目的并等待用户确认。',
     '7. 扩展目录名与 Extension.toml 的 extension.id 必须完全一致（含大小写）。',
+    `8. 共享 UniBot 测试环境（只读，用于运行校验脚本验证扩展，禁止修改其内容）：\n` +
+      `   - 环境根目录：${config.unibot_env.test_dir}\n` +
+      `   - 校验命令：${unibotEnvPython()} ${validationScriptPath()} <扩展目录> --unibot-root ${config.unibot_env.test_dir}\n` +
+      '   - 扩展目录为草稿工作区内的扩展目录（如 <workspace>/<ExtensionId>）；运行前先确认测试环境已就绪。',
   ].join('\n');
 }
 
