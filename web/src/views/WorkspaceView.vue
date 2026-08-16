@@ -49,6 +49,13 @@ const draft = computed(() => store.currentDraft)
 const busy = computed(() =>
   ['planning', 'coding', 'debugging'].includes(draft.value?.status),
 )
+/** 审查真正进行中：status 为 reviewing 且没有待修复的 must_fix（结算出 must_fix 后展示自动修复而非标语） */
+const reviewRunning = computed(
+  () =>
+    reviewing.value ||
+    (draft.value?.status === 'reviewing' &&
+      !(draft.value?.review?.issues ?? []).some((issue) => issue.severity === 'must_fix')),
+)
 const reviewPassed = computed(() => draft.value?.review?.status === 'passed')
 const canPublish = computed(
   () =>
@@ -374,6 +381,7 @@ onUnmounted(() => {
         :pending-permissions="store.pendingPermissions"
         :pending-questions="store.pendingQuestions"
         :busy="busy"
+        :reviewing="reviewRunning"
         @send="send"
         @stop="stop"
         @reply-permission="replyPermission"

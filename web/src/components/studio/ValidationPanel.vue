@@ -5,6 +5,7 @@ import { Icon } from '@iconify/vue'
 import AiReviewPanel from './AiReviewPanel.vue'
 import Button from '@/components/ui/Button.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { use_rotating_slogan, REVIEW_SLOGANS } from '@/composables/use_rotating_slogan'
 
 const props = defineProps({
   draft: { type: Object, required: true },
@@ -46,10 +47,29 @@ const canReview = computed(
     !['planning', 'coding', 'debugging', 'reviewing'].includes(props.draft.status) &&
     !props.repairing,
 )
+/**
+ * 审查真正进行中：status 为 reviewing 且没有待处理的 must_fix
+ * （审查结算出 must_fix 后 status 仍是 reviewing，但此时应展示「自动修复」而非标语）。
+ */
+const reviewRunning = computed(
+  () => props.reviewing || (props.draft.status === 'reviewing' && mustFixCount.value === 0),
+)
+
+/** 审查等待标语（随机轮换，缓解干等） */
+const { slogan: reviewSlogan } = use_rotating_slogan(reviewRunning, REVIEW_SLOGANS)
 </script>
 
 <template>
   <div class="review-panel">
+    <!-- 审查进行中：随机轮换等待标语（Plan 3.5：不让用户干等） -->
+    <div v-if="reviewRunning" class="review-progress">
+      <div class="review-progress-head">
+        <Icon icon="lucide:brain" width="15" class="spin" />
+        <span>正在审查功能</span>
+      </div>
+      <p class="review-slogan">{{ reviewSlogan }}</p>
+    </div>
+
     <div class="review-actions">
       <Button :loading="reviewing" :disabled="!canReview" @click="emit('review')">
         <Icon
@@ -98,6 +118,38 @@ const canReview = computed(
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* ---------- 审查进行中：等待标语 ---------- */
+.review-progress {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--surface) 70%);
+  box-shadow: var(--shadow);
+}
+
+.review-progress-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.review-progress-head .spin {
+  animation: spin 1s linear infinite;
+}
+
+.review-slogan {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  min-height: 1.6em;
+  transition: opacity 150ms ease-out;
 }
 
 .review-actions {
