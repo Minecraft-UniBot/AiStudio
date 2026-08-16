@@ -1,0 +1,20 @@
+{
+  "name": "unibot-extension-studio-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "UniBot Extension Studio 桌面客户端（Electrobun）",
+  "scripts": {
+    "stage": "bun scripts/stage.ts",
+    "fetch:opencode": "bun scripts/fetch-opencode.ts",
+    "preview": "bun scripts/preview.ts",
+    "dev": "bun scripts/stage.ts && bun hutch electrobun dev --watch",
+    "build:canary": "bun scripts/stage.ts && bun hutch electrobun build --env=canary",
+    "build:production": "bun scripts/stage.ts && bun hutch electrobun build --env=production",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.2",
+    "typescript": "^5.7.2"
+  }
+}

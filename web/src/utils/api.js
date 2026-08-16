@@ -1,7 +1,14 @@
 // API 封装：统一 fetch + token 管理 + WebSocket 事件连接
 const TOKEN_KEY = 'studio_token'
-// REST 走 vite 代理；WebSocket 直连后端（Bun 下 vite 的 ws 代理有兼容问题）
-const WS_BASE = import.meta.env.VITE_STUDIO_WS ?? 'ws://127.0.0.1:9876'
+// WebSocket 地址解析优先级：
+// 1. VITE_STUDIO_WS 构建期显式指定（如自定义部署地址）
+// 2. 生产构建：与页面同源（桌面客户端由 Studio Server 同源提供页面，REST/WS 同一端口）
+// 3. 开发模式：直连后端 9876（Bun 下 vite 的 ws 代理有兼容问题，见 README）
+const WS_BASE =
+  import.meta.env.VITE_STUDIO_WS ??
+  (import.meta.env.PROD
+    ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+    : 'ws://127.0.0.1:9876')
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY) ?? ''

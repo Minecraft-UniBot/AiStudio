@@ -5,7 +5,8 @@
  * 安全：所有接口要求管理员权限（Bearer token），OpenCode 网关仅监听 127.0.0.1。
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { ensureDataDirs, saveConfig, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
 import { config } from './config';
 import { opencode, resolvePermissionTarget } from './opencode';
@@ -690,6 +691,37 @@ async function ensureSession(
 }
 
 // ===== 启动 =====
+/**
+ * 静态资源服务（桌面客户端模式，对应 config.static_dir）：
+ * - 前端构建产物由 Studio Server 同源提供，REST 与 WebSocket 走同一端口
+ * - SPA 回退：非 /api 且文件不存在的 GET 一律回退 index.html（支持 /workspace/:id 等前端路由）
+ * - 路径穿越防护：规范化后必须仍位于 static_dir 之内
+ */
+function serveStatic(req: Request, url: URL): Response | null {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return null;
+  const dir = config.static_dir;
+  if (!dir) return null;
+  if (url.pathname.startsWith('/api/')) return null;
+
+  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
+  const filePath = resolve(join(dir, rel));
+  if (!filePath.startsWith(resolve(dir) + sep)) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  let target = filePath;
+  try {
+    if (statSync(target).isDirectory()) target = join(target, 'index.html');
+  } catch {
+    // 文件不存在：走 SPA 回退
+  }
+  if (!existsSync(target)) {
+    target = join(dir, 'index.html');
+    if (!existsSync(target)) return null;
+  }
+  return new Response(Bun.file(target));
+}
+
 const server = Bun.serve({
   hostname: config.host,
   port: config.port,
@@ -708,6 +740,11 @@ const server = Bun.serve({
       return undefined;
     }
     const start = Date.now();
+    // 静态资源优先于 API 路由（登录页等前端资源无需认证）
+    if (config.static_dir) {
+      const staticRes = serveStatic(req, url);
+      if (staticRes) return staticRes;
+    }
     const res = await handleRequest(req);
     logger.info('http', `${req.method} ${url.pathname} -> ${res.status}`, {
       ms: Date.now() - start,

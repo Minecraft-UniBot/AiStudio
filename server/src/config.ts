@@ -36,9 +36,11 @@ function loadConfig(): StudioConfig {
     extensions_dir: join(detectUnibotDir(), 'Extensions'),
     host: process.env.UNIBOT_STUDIO_HOST ?? '127.0.0.1',
     port: Number(process.env.UNIBOT_STUDIO_PORT ?? 9876),
+    static_dir: process.env.UNIBOT_STUDIO_STATIC_DIR ?? '',
     opencode: {
       bin: process.env.OPENCODE_BIN ?? 'opencode',
-      version: '1.18.4',
+      // 与 server/package.json 的 @opencode-ai/sdk 版本一致；桌面客户端随包内置该版本二进制
+      version: '1.18.18',
       data_dir: join(dataDir, 'opencode'),
     },
     unibot_env: {

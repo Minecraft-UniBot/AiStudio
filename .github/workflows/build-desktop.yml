@@ -1,0 +1,153 @@
+# UniBot Extension Studio 桌面客户端打包工作流
+#
+# 产出（Electrobun 生产构建，各平台安装包 + 更新归档）：
+#   macOS ARM64 : production-macos-arm64-UniBotExtensionStudio.dmg / .app.tar.zst
+#   Windows x64 : production-win-x64-UniBotExtensionStudio-Setup.zip / .tar.zst
+#   Linux x64   : production-linux-x64-UniBotExtensionStudio-Setup.tar.gz / .tar.zst
+#
+# 触发方式：
+#   1. 手动触发（workflow_dispatch）—— 只构建并上传 artifacts
+#   2. 推送 tag desktop-v*（如 desktop-v0.2.0）—— 构建并创建 GitHub Release 草稿
+#
+# 说明：
+#   - opencode 从 npm registry 获取平台二进制（opencode-<os>-<arch> 包，
+#     desktop/scripts/fetch-opencode.ts），随安装包内置，用户无需另行安装
+#   - 版本号取 tag 中的 v 前缀之后的部分（desktop-v0.2.0 -> 0.2.0），
+#     手动触发默认 0.1.0，可用仓库变量覆盖
+#   - 构建在原生 runner 上进行（hutch 只构建当前宿主平台）
+
+name: Build Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-14
+          - name: windows-x64
+            runner: windows-latest
+          - name: linux-x64
+            runner: ubuntu-24.04
+          # ARM64 Linux 构建（GitHub 公开预览 runner）：
+          # - name: linux-arm64
+          #   runner: ubuntu-24.04-arm
+    env:
+      # 与 server/src/config.ts 的 opencode.version 保持一致
+      OPENCODE_VERSION: "1.18.18"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Hutch store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.hutch/releases
+            ~/.hutch/toolchains
+          key: hutch-${{ matrix.name }}-2.0.1-beta.14
+
+      - name: Install Hutch (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
+          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+          "$HOME/.hutch/bin/hutch" --version
+
+      - name: Install Hutch (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ([scriptblock]::Create((irm https://hutch.blackboard.sh/hutch/install.ps1)))
+          "$env:USERPROFILE\.hutch\bin" | Out-File -Append $env:GITHUB_PATH
+          & "$env:USERPROFILE\.hutch\bin\hutch.exe" --version
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd server && bun install --frozen-lockfile
+          cd ../web && bun install --frozen-lockfile
+          cd ../desktop && bun install --frozen-lockfile
+
+      - name: Run server tests
+        shell: bash
+        run: cd server && bun test
+
+      - name: Build web
+        shell: bash
+        run: cd web && bun run build
+
+      - name: Fetch bundled opencode
+        shell: bash
+        run: cd desktop && bun scripts/fetch-opencode.ts
+
+      - name: Stage app inputs (server bundle / web / opencode)
+        shell: bash
+        run: cd desktop && bun scripts/stage.ts
+
+      - name: Resolve app version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          if [ "$VERSION" = "$GITHUB_REF_NAME" ]; then VERSION="0.1.0"; fi
+          echo "STUDIO_APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "构建版本：$VERSION"
+
+      - name: Build production bundle
+        shell: bash
+        run: cd desktop && hutch electrobun build --env=production
+
+      - name: Verify artifacts
+        shell: bash
+        run: |
+          ls -la desktop/artifacts/
+          test -n "$(ls desktop/artifacts/ | grep -E '^production-')"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: desktop/artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Collect artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create release draft
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "UniBot Extension Studio ${{ github.ref_name }}"
+          draft: true
+          files: release-artifacts/**
+          generate_release_notes: true

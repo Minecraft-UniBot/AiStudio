@@ -55,6 +55,19 @@ cd web && bun run dev
 
 浏览器访问 `http://localhost:9877`，使用平台访问口令登录（首次启动自动生成，保存在 `~/.unibot-studio/config/studio.json`，可用 `UNIBOT_STUDIO_PASSWORD` 环境变量覆盖）。
 
+## 桌面客户端（Electrobun）
+
+`desktop/` 提供跨平台桌面客户端（macOS / Windows / Linux）：安装包**自带 opencode**（无需用户单独安装），安装后即为「后端 + 前端」一体应用，直接打开工坊窗口。
+
+```bash
+cd desktop
+bun scripts/fetch-opencode.ts     # 下载内置 opencode（npm registry，约 45MB）
+bun run build:production          # 构建当前平台安装包（产物在 desktop/artifacts/）
+```
+
+- 开发、配置与常见问题：见 [`desktop/README.md`](desktop/README.md)
+- 打包工作流：`.github/workflows/build-desktop.yml`（手动触发，或推送 tag `desktop-v*` 自动构建并创建 Release 草稿）
+
 ## 配置
 
 配置存于 `~/.unibot-studio/config/studio.json`（数据目录 `~/.unibot-studio/`）：

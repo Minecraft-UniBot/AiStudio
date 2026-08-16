@@ -242,6 +242,8 @@ export interface StudioConfig {
   extensions_dir: string;
   host: string;
   port: number;
+  /** 前端静态资源目录（桌面客户端模式：由桌面主进程注入 web/dist 路径；为空则不提供静态服务） */
+  static_dir: string;
   opencode: {
     bin: string;
     version: string;
