@@ -127,6 +127,14 @@ jobs:
           echo "STUDIO_APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "构建版本：$VERSION"
 
+      # Windows 的 System32 tar（bsdtar）会把 "D:\..." 绝对路径当作远程主机
+      # （Cannot connect to D: resolve failed），而 hutch 打包内部以绝对路径调用 tar。
+      # 把 Git for Windows 自带的 GNU tar 放到 PATH 最前，让 hutch 解析到它。
+      - name: Prefer GNU tar on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "C:/Program Files/Git/usr/bin" >> "$GITHUB_PATH"
+
       - name: Build production bundle
         shell: bash
         run: cd desktop && hutch electrobun build --env=production
