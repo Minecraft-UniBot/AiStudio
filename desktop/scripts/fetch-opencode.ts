@@ -80,10 +80,12 @@ if (existsSync(DEST) && !force) {
   process.exit(0);
 }
 
-// 清理之前中断下载残留的临时目录
-for (const entry of readdirSync(VENDOR_OPENCODE, { withFileTypes: true })) {
-  if (entry.name.startsWith(".tmp-")) {
-    rmSync(join(VENDOR_OPENCODE, entry.name), { recursive: true, force: true });
+// 清理之前中断下载残留的临时目录（首次运行 vendor/ 尚不存在，跳过清理）
+if (existsSync(VENDOR_OPENCODE)) {
+  for (const entry of readdirSync(VENDOR_OPENCODE, { withFileTypes: true })) {
+    if (entry.name.startsWith(".tmp-")) {
+      rmSync(join(VENDOR_OPENCODE, entry.name), { recursive: true, force: true });
+    }
   }
 }
 
