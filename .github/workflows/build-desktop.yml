@@ -142,8 +142,17 @@ jobs:
 
       # Windows 分支用 pwsh（与官方 CI 一致），避免 Git Bash 会话把 Git usr/bin 提到
       # PATH 最前导致 hutch 解析到有远程主机 bug 的 GNU tar。
-      - name: Build production bundle
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+      # （注：shell 字段不支持 ${{ runner.os }} 表达式，故按平台拆两个步骤）
+      - name: Build production bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd desktop
+          hutch electrobun build --env=production
+
+      - name: Build production bundle (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           cd desktop
           hutch electrobun build --env=production
