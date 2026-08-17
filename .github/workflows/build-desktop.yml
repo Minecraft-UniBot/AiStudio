@@ -15,6 +15,8 @@
 #   - 版本号取 tag 中的 v 前缀之后的部分（desktop-v0.2.0 -> 0.2.0），
 #     手动触发默认 0.1.0，可用仓库变量覆盖
 #   - 构建在原生 runner 上进行（hutch 只构建当前宿主平台）
+#   - 本仓库为独立仓库（不含 Market/），server 测试依赖市场注册表
+#     Market/extensions.json，故额外拉取 MineJPGcraft/UniBot.Market 到 Market/
 
 name: Build Desktop
 
@@ -53,6 +55,14 @@ jobs:
       OPENCODE_VERSION: "1.18.18"
     steps:
       - uses: actions/checkout@v4
+
+      # Studio 是独立仓库，不含 Market/；server 测试与提示词依赖市场注册表，
+      # 拉取到工作区根 Market/ 以匹配 config.ts 的路径解析（Studio/../Market）。
+      - name: Checkout Market registry
+        uses: actions/checkout@v4
+        with:
+          repository: MineJPGcraft/UniBot.Market
+          path: Market
 
       - uses: oven-sh/setup-bun@v2
         with:
