@@ -3,13 +3,14 @@
  */
 import { describe, expect, test, beforeAll } from 'bun:test';
 import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { docsAllowlistPaths, marketAllowlistPaths, marketRegistryPath } from '../src/config';
 
 describe('白名单路径', () => {
   test('文档白名单包含全部 6 个文档文件', () => {
     const paths = docsAllowlistPaths();
     expect(paths.length).toBe(6);
-    const names = paths.map((p) => p.split('/').pop());
+    const names = paths.map((p) => basename(p));
     expect(names).toContain('开发插件.md');
     expect(names).toContain('扩展系统.md');
     expect(names).toContain('配置说明.md');
