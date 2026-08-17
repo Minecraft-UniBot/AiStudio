@@ -6,9 +6,10 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { resSrcDir } from './config';
 import type { ExtensionType } from './types';
 
-const SKILLS_DIR = join(import.meta.dir, '..', 'skills');
+const SKILLS_DIR = join(resSrcDir(), '..', 'skills');
 
 /** skill 文件 front-matter 中的类型声明（如 types: command / types: api,command） */
 interface SkillMeta {

@@ -68,7 +68,7 @@ export function selectIssues(issues: ReviewIssue[], includeSuggestions: boolean)
 export async function startDebugging(
   draftId: string,
   issues: ReviewIssue[] | null = null,
-  options: { include_suggestions?: boolean } = {},
+  options: { include_suggestions?: boolean; fix_validation?: boolean } = {},
 ): Promise<ReviewResult> {
   const draft = readDraft(draftId);
   const review = draft.review;
@@ -127,7 +127,9 @@ export async function startDebugging(
   const issueList = target
     .map((i) => `- [${i.severity}] ${i.title}（${i.file ?? '未知文件'}）\n  ${i.detail}\n  建议：${i.suggestion ?? '无'}`)
     .join('\n');
-  const prompt = `请修复以下审查问题（第 ${round} 轮）：\n\n${issueList}\n\n修复完成后简要说明改动。`;
+  const prompt = options.fix_validation
+    ? `请修复以下机械校验失败项（第 ${round} 轮）：\n\n${issueList}\n\n修复后请自行重新运行校验命令确认通过（校验命令见系统提示中的测试环境说明）；完成后简要说明改动。`
+    : `请修复以下审查问题（第 ${round} 轮）：\n\n${issueList}\n\n修复完成后简要说明改动。`;
 
   await client.session.promptAsync({
     path: { id: sessionId },

@@ -9,7 +9,7 @@ import { existsSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { ensureDataDirs, saveConfig, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
 import { config } from './config';
-import { opencode, resolvePermissionTarget } from './opencode';
+import { opencode, resolvePermissionTarget, normalizeProviders } from './opencode';
 import { logger } from './logger';
 import { trackSession, untrackDraft } from './sessions';
 import {
@@ -36,7 +36,7 @@ import { getTools, updateTools } from './tools';
 import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './prompts';
 import { buildSecurity } from './pipeline';
 import { ensureUnibotEnv, getUnibotEnvStatus, syncUnibotEnv } from './unibot_env';
-import { runValidation } from './validation';
+import { runValidation, validationFixIssues } from './validation';
 import { assertFeatureEnabled } from './registry';
 import type { DraftMeta } from './types';
 
@@ -160,18 +160,9 @@ async function handleRequest(req: Request): Promise<Response> {
         client.app.agents({}),
       ]);
       const providerList = (providersRes.data as { providers?: unknown[] })?.providers ?? [];
-      const providers = (providerList as Array<Record<string, unknown>>)
-        .map((p) => ({
-          provider_id: String(p.id ?? ''),
-          label: String(p.label ?? p.id ?? ''),
-          models: Array.isArray(p.models)
-            ? p.models.map((m) => ({
-                id: String((m as Record<string, unknown>).id ?? m),
-                label: String((m as Record<string, unknown>).label ?? (m as Record<string, unknown>).id ?? m),
-              }))
-            : [],
-        }))
-        .filter((p) => p.provider_id);
+      // opencode Provider 结构：{ id, name, models: { [modelID]: Model } }，
+      // models 是对象字典而非数组；Provider/Model 用 name。统一归一化给前端（见 opencode.ts）。
+      const providers = normalizeProviders(providerList as Array<Record<string, unknown>>);
       const agents = (agentsRes.data as Array<{ name?: string }> ?? [])
         .map((a) => String(a.name ?? ''))
         .filter(Boolean);
@@ -435,9 +426,27 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'check': {
           if (req.method === 'POST') {
-            // 机械校验（在共享 UniBot 测试环境中执行，见 validation.ts）
+            // 手动重新校验：通过且审查已通过 → ready；失败 → draft + 错误（与审查后自动校验一致）。
+            // 这是校验失败/测试环境恢复后的重跑入口，避免草稿卡死在 draft。
             const run = await runValidation(draftId);
             broadcast({ type: 'validation.updated', draft_id: draftId, run });
+            if (run.status === 'passed') {
+              const after = readDraft(draftId);
+              if (after.review?.status === 'passed') {
+                updateDraft(draftId, { status: 'ready' });
+                broadcast({ type: 'draft.updated', draft_id: draftId, status: 'ready' });
+              }
+            } else {
+              const failedSteps = run.steps.filter((step) => step.status === 'failed');
+              const envStep = failedSteps.find((step) => step.id === 'env');
+              updateDraft(draftId, {
+                status: 'draft',
+                error:
+                  envStep?.message ??
+                  `机械校验未通过：${failedSteps.map((s) => s.name).join('、')}（详见检查结果）`,
+              });
+              broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+            }
             return json(run);
           }
           break;
@@ -466,7 +475,11 @@ async function handleRequest(req: Request): Promise<Response> {
             // 审查后的自动修复：
             // - 有 must_fix → 自动修复（审查未通过）
             // - 无 must_fix 但用户请求（include_suggestions）→ 附带 suggestion 一起修
-            const body = (await req.json().catch(() => ({}))) as { include_suggestions?: boolean };
+            // - fix_validation → 机械校验失败：把失败步骤作为问题单交给 AI 修复（提供修复条件）
+            const body = (await req.json().catch(() => ({}))) as {
+              include_suggestions?: boolean;
+              fix_validation?: boolean;
+            };
             const current = readDraft(draftId);
             const reviewMustFix = current.review?.issues?.filter((i) => i.severity === 'must_fix');
             const reviewSuggestions = current.review?.issues?.filter(
@@ -478,6 +491,21 @@ async function handleRequest(req: Request): Promise<Response> {
             }
             if (body.include_suggestions && reviewSuggestions?.length) {
               const review = await startDebugging(draftId, null, { include_suggestions: true });
+              return json(review);
+            }
+            if (body.fix_validation) {
+              if (current.validation?.status !== 'failed') {
+                return errorJson('没有失败的机械校验记录，无需修复', 1, 400);
+              }
+              const issues = validationFixIssues(current.validation);
+              if (issues.length === 0) {
+                return errorJson(
+                  '校验失败来自测试环境（非代码问题，AI 无法修复），请先同步测试环境后再试',
+                  1,
+                  400,
+                );
+              }
+              const review = await startDebugging(draftId, issues, { fix_validation: true });
               return json(review);
             }
             return errorJson('没有需要修复的问题', 1, 400);
@@ -784,6 +812,32 @@ for (const draft of listDrafts()) {
     (draft.status === 'planning' || draft.status === 'coding' || draft.status === 'debugging')
   ) {
     updateDraft(draft.id, { phase: draft.status });
+  }
+  // 服务重启前正在执行的机械校验（进程被杀）落盘为 failed：
+  // 否则校验记录永久停留在「进行中」，重启后仍显示运行中
+  if (draft.validation?.status === 'running') {
+    updateDraft(draft.id, {
+      validation: {
+        ...draft.validation,
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        steps: [
+          {
+            id: 'interrupted',
+            name: '机械校验',
+            status: 'failed',
+            message: '机械校验因服务重启中断，未完成',
+            detail: '请点「重新校验」重新执行机械校验。',
+            duration_ms: 0,
+          },
+        ],
+      },
+      error: undefined,
+    });
+    logger.warn('draft', '启动恢复：中断的机械校验记录已置为失败', {
+      draft_id: draft.id,
+      extension_id: draft.extension_id,
+    });
   }
   if (draft.session_id) {
     trackSession(draft.id, draft.session_id);

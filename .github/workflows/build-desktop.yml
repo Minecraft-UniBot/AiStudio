@@ -1,9 +1,13 @@
 # UniBot Extension Studio 桌面客户端打包工作流
 #
-# 产出（Electrobun 生产构建，各平台安装包 + 更新归档）：
+# 产出 1 —— Electrobun 生产构建（原生窗口应用，各平台安装包 + 更新归档）：
 #   macOS ARM64 : production-macos-arm64-UniBotExtensionStudio.dmg / .app.tar.zst
 #   Windows x64 : production-win-x64-UniBotExtensionStudio-Setup.zip / .tar.zst
 #   Linux x64   : production-linux-x64-UniBotExtensionStudio-Setup.tar.gz / .tar.zst
+#   （Electrobun 无 macOS x64 核心，Intel Mac 请用 Web 版）
+# 产出 2 —— 单文件可运行版（仅 macOS ARM64，bun build --compile，无需安装、自动开浏览器）：
+#   desktop/artifacts/portable/UniBotStudio-darwin-arm64
+#   opencode 不内置：首次运行自动下载到用户数据目录（见 desktop/README.md「单文件可运行版」）
 #
 # 触发方式：
 #   1. 手动触发（workflow_dispatch）—— 只构建并上传 artifacts
@@ -170,10 +174,61 @@ jobs:
           path: desktop/artifacts/*
           if-no-files-found: error
 
+  # 单文件可运行版（macOS ARM64）：bun build --compile，无需安装包、无需 hutch/Electrobun。
+  # ARM Mac 用户既可装 Electrobun 窗口安装包（上方 build job），也可直接跑单个 exe。
+  # opencode 不内置：启动器首次运行自动下载（见 desktop/README.md「单文件可运行版」）。
+  # （Windows / Linux 及 Intel Mac 暂不发布单文件版：前者用安装包，后者用 Web 版。）
+  portable:
+    name: portable-darwin-arm64
+    runs-on: macos-14
+    env:
+      # 与 server/src/config.ts 的 opencode.version 保持一致
+      OPENCODE_VERSION: "1.18.18"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd server && bun install --frozen-lockfile
+          cd ../web && bun install --frozen-lockfile
+          cd ../desktop && bun install --frozen-lockfile
+
+      - name: Build web
+        shell: bash
+        run: cd web && bun run build
+
+      # stage 会 bundle 后端、铺齐 vendor/（含 web/dist 与 prompts/skills/validation）；
+      # 单文件版不需要内置 opencode 二进制，stage 缺 opencode 只会警告不会失败。
+      - name: Stage app inputs
+        shell: bash
+        run: cd desktop && bun scripts/stage.ts
+
+      - name: Build portable executable
+        shell: bash
+        run: cd desktop && bun scripts/build-portable.ts
+
+      - name: Verify artifacts
+        shell: bash
+        run: |
+          ls -la desktop/artifacts/portable/
+          test -n "$(ls desktop/artifacts/portable/ | grep -E '^UniBotStudio-')"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-darwin-arm64
+          path: desktop/artifacts/portable/*
+          if-no-files-found: error
+
   release:
     name: Create GitHub Release
     if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: build
+    needs: [build, portable]
     runs-on: ubuntu-latest
     permissions:
       contents: write

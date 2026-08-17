@@ -91,12 +91,20 @@ export function use_studio_events() {
         case 'question.rejected':
           store.removePendingQuestion(event.question_id)
           break
+        case 'validation.updated':
+          // 机械校验完成（自动/手动）：刷新草稿（校验结果与状态流转）
+          store.refreshCurrent(event.draft_id)
+          break
         default:
           break
       }
     }
     if (event.type === 'review.updated' && event.draft_id === store.currentDraft?.id) {
       store.refreshCurrent(event.draft_id)
+    }
+    // 测试环境同步进度（非草稿级事件）：刷新平台状态
+    if (event.type === 'unibot-env.updated') {
+      store.fetchStatus()
     }
   }
 

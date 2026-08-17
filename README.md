@@ -68,6 +68,17 @@ bun run build:production          # 构建当前平台安装包（产物在 desk
 - 开发、配置与常见问题：见 [`desktop/README.md`](desktop/README.md)
 - 打包工作流：`.github/workflows/build-desktop.yml`（手动触发，或推送 tag `desktop-v*` 自动构建并创建 Release 草稿）
 
+不想用安装包？`desktop/` 还提供**单文件可运行版**（`bun run build:portable`，产物为单个可执行文件，
+运行自动打开浏览器进入工坊，首次联网自动下载 opencode 引擎；CI/Release 发布 macOS ARM64 版，
+本机也可自建其他平台版本）：
+
+```bash
+cd desktop
+bun run build:portable            # 产物：desktop/artifacts/portable/UniBotStudio-<平台>-<架构>
+```
+
+详见 [`desktop/README.md`](desktop/README.md) 的「单文件可运行版」一节。
+
 ## 配置
 
 配置存于 `~/.unibot-studio/config/studio.json`（数据目录 `~/.unibot-studio/`）：

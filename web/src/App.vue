@@ -52,8 +52,8 @@ onUnmounted(() => {
           >
             <span class="toast-icon-wrap">
               <Icon
-                :icon="toast.type === 'success' ? 'lucide:check-circle-2' : toast.type === 'error' ? 'lucide:alert-circle' : 'lucide:info'"
-                width="15"
+                :icon="toast.type === 'success' ? 'lucide:check' : toast.type === 'error' ? 'lucide:alert-circle' : 'lucide:info'"
+                width="14"
               />
             </span>
             <span class="toast-message">{{ toast.message }}</span>
@@ -81,28 +81,32 @@ onUnmounted(() => {
 
 .toast-container {
   position: fixed;
-  top: 14px;
-  right: 14px;
+  top: 16px;
+  right: 16px;
+  /* 等宽堆叠：所有 toast 撑满同一宽度，短消息不会收缩，视觉整齐 */
+  width: min(380px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-2);
   z-index: var(--z-tooltip);
   pointer-events: none;
-  max-width: min(400px, calc(100vw - 28px));
 }
 
 .toast-item {
   position: relative;
   pointer-events: auto;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 12px 14px 14px;
-  background: rgb(255 255 255 / 0.92);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 12px 14px;
+  background: rgb(255 255 255 / 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgb(228 228 231 / 0.9);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.1);
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.05),
+    0 8px 24px rgb(0 0 0 / 0.08);
   font-size: var(--text-sm);
   overflow: hidden;
 }
@@ -111,11 +115,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius);
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   flex-shrink: 0;
-  margin-top: -1px;
 }
 
 .toast-item.success .toast-icon-wrap {
@@ -135,8 +138,10 @@ onUnmounted(() => {
 
 .toast-message {
   flex: 1;
+  min-width: 0;
   color: var(--text);
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: 1.5;
   word-break: break-word;
 }
 
@@ -144,8 +149,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   border: none;
   background: transparent;
@@ -173,10 +178,10 @@ onUnmounted(() => {
   position: absolute;
   left: 0;
   bottom: 0;
-  height: 3px;
+  height: 2px;
   width: 100%;
   transform-origin: left;
-  border-radius: 0 0 0 var(--radius-lg);
+  opacity: 0.85;
   animation-name: toast-progress;
   animation-timing-function: linear;
   animation-fill-mode: forwards;
@@ -209,8 +214,8 @@ onUnmounted(() => {
 
 .toast-enter-active {
   transition:
-    opacity 220ms ease-out,
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 260ms ease-out,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .toast-leave-active {
@@ -219,10 +224,14 @@ onUnmounted(() => {
     transform 160ms ease-in;
 }
 
-.toast-enter-from,
+.toast-enter-from {
+  opacity: 0;
+  transform: translateX(calc(100% + 16px)) scale(0.97);
+}
+
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(28px) scale(0.96);
+  transform: translateX(24px) scale(0.97);
 }
 </style>
 

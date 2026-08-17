@@ -17,6 +17,8 @@ const emit = defineEmits(['publish'])
 const canPublishHint = computed(() => {
   const status = props.draft.status
   if (status === 'published') return '已发布，草稿为只读'
+  // 审查通过但机械校验失败退回 draft：提示真实原因（顶部错误横幅有详情）
+  if (props.draft.error) return '机械校验未通过，暂时无法发布（见顶部错误提示）'
   if (status !== 'ready') return '审查通过后即可发布'
   return ''
 })

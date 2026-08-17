@@ -8,14 +8,32 @@
  */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { config } from './config';
+import { config, resSrcDir } from './config';
 import { DraftError, computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
 import { logger } from './logger';
 import { getUnibotEnvStatus, runProcess } from './unibot_env';
-import type { ValidationRun, ValidationStepId, ValidationStepResult } from './types';
+import type { ReviewIssue, ValidationRun, ValidationStepId, ValidationStepResult } from './types';
 
 /** 同一草稿并发校验锁 */
 const VALIDATION_LOCKS = new Set<string>();
+
+/**
+ * 把校验失败步骤转为可交给 AI 修复的问题单（提供「修复条件」）。
+ * 环境类（id='env'）与中断类（id='interrupted'）步骤属于基础设施/运行问题，
+ * AI 无法修复，予以排除；全部失败均为此类时返回空数组，调用方应引导重跑校验。
+ */
+export function validationFixIssues(run: ValidationRun): ReviewIssue[] {
+  return (run.steps ?? [])
+    .filter(
+      (step) => step.status === 'failed' && step.id !== 'env' && step.id !== 'interrupted',
+    )
+    .map((step, i) => ({
+      id: `vfix-${i + 1}`,
+      severity: 'must_fix' as const,
+      title: `机械校验失败：${step.name}`,
+      detail: [step.message, step.detail].filter(Boolean).join('\n') || `校验步骤「${step.name}」未通过`,
+    }));
+}
 
 /** 解析校验脚本输出的结构化 JSON */
 function parseValidationOutput(
@@ -59,7 +77,30 @@ export async function runValidation(draftId: string): Promise<ValidationRun> {
     // 环境必须已就绪（共享一份，见 unibot_env.ts）
     const env = getUnibotEnvStatus();
     if (env.state !== 'ready' || !env.venv_ready) {
-      throw new DraftError('UniBot 测试环境未就绪，请先在平台同步环境后再检查', 'ENV_NOT_READY');
+      // 环境未就绪不是代码问题：记录为 failed 校验（env 步骤）而不是抛错，
+      // 调用方据此提示「同步测试环境」，前端也能展示失败原因并给出对应操作
+      const failed: ValidationRun = {
+        ...run,
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        steps: [
+          {
+            id: 'env',
+            name: '测试环境',
+            status: 'failed',
+            message: 'UniBot 测试环境未就绪，请先在平台同步环境后再检查',
+            detail: `当前环境状态：${env.state}${env.error ? '；' + env.error : ''}`,
+            duration_ms: 0,
+          },
+        ],
+      };
+      updateDraft(draftId, { validation: failed });
+      logger.warn('validation', '测试环境未就绪，机械校验未执行', {
+        draft_id: draftId,
+        env_state: env.state,
+        env_error: env.error,
+      });
+      return failed;
     }
     const unibot_root = config.unibot_env.test_dir;
     const python = join(
@@ -68,7 +109,12 @@ export async function runValidation(draftId: string): Promise<ValidationRun> {
       process.platform === 'win32' ? 'Scripts' : 'bin',
       process.platform === 'win32' ? 'python.exe' : 'python',
     );
-    const script = join(import.meta.dir, '..', 'validation', 'validate_extension.py');
+    const script = join(
+      resSrcDir(),
+      '..',
+      'validation',
+      'validate_extension.py',
+    );
     const ext_dir = join(draftWorkspace(draftId), draft.extension_id);
     logger.info('validation', '开始机械校验', {
       draft_id: draftId,

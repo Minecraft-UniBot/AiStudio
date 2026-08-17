@@ -73,7 +73,9 @@ export type ValidationStepId =
   | 'ruff'           // Ruff format + lint
   | 'tests'          // 草稿自带测试
   | 'loader'         // 真实 Loader 发现、绑定
-  | 'dependencies';  // 依赖声明检查
+  | 'dependencies'   // 依赖声明检查
+  | 'env'            // 测试环境未就绪（非代码问题，AI 无法修复）
+  | 'interrupted';   // 校验因服务重启/进程退出中断（非代码问题，重新校验即可）
 
 export interface ValidationStepResult {
   id: ValidationStepId;

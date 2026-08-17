@@ -125,7 +125,10 @@ function toggleType(type) {
       </div>
       <div class="field">
         <label class="form-label">模型</label>
-        <span class="form-hint">可选，默认使用后端配置</span>
+        <span v-if="store.optionsError" class="form-hint danger">
+          {{ store.optionsError }}
+        </span>
+        <span v-else class="form-hint">可选，默认使用后端配置</span>
         <div class="row">
           <Select v-model="form.provider_id" :options="providerOptions" placeholder="自动选择" />
           <Select
@@ -162,6 +165,10 @@ function toggleType(type) {
 .form-hint {
   font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+.form-hint.danger {
+  color: var(--danger);
 }
 
 .type-group {

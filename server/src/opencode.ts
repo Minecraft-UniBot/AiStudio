@@ -84,6 +84,39 @@ export function resolvePermissionTarget(
   };
 }
 
+export interface ProviderOption {
+  provider_id: string;
+  label: string;
+  models: Array<{ id: string; label: string }>;
+}
+
+/**
+ * 归一化 opencode `/config/providers` 返回 → 前端 options.providers（导出供测试）。
+ *
+ * opencode Provider 结构：{ id, name, models: { [modelID]: Model } }——
+ * - models 是「模型 ID → Model」的对象字典，不是数组（用 Array.isArray 判断恒为 false，
+ *   会把所有模型的列表解析成空，前端表现为「无法获取模型」）
+ * - Provider / Model 的展示字段是 name，没有 label
+ */
+export function normalizeProviders(
+  providerList: Array<Record<string, unknown>>,
+): ProviderOption[] {
+  return providerList
+    .map((p) => ({
+      provider_id: String(p.id ?? ''),
+      label: String(p.label ?? p.name ?? p.id ?? ''),
+      models: Object.entries((p.models as Record<string, unknown>) ?? {}).map(([modelId, raw]) => {
+        const m = (raw ?? {}) as Record<string, unknown>;
+        const id = String(m.id ?? modelId);
+        return {
+          id,
+          label: String(m.name ?? m.label ?? id),
+        };
+      }),
+    }))
+    .filter((p) => p.provider_id);
+}
+
 class OpenCodeGateway {
   private process: ChildProcess | null = null;
   private port = 0;

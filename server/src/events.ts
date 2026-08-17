@@ -406,13 +406,13 @@ export async function settleReviewAndAdvance(draftId: string): Promise<void> {
         if (run.status === 'passed') {
           updateDraft(draftId, { status: 'ready' });
         } else {
-          const failedNames = run.steps
-            .filter((step) => step.status === 'failed')
-            .map((step) => step.name)
-            .join('、');
+          const failedSteps = run.steps.filter((step) => step.status === 'failed');
+          const envStep = failedSteps.find((step) => step.id === 'env');
+          const failedNames = failedSteps.map((step) => step.name).join('、');
           updateDraft(draftId, {
             status: 'draft',
-            error: `机械校验未通过：${failedNames}（详见检查结果）`,
+            error:
+              envStep?.message ?? `机械校验未通过：${failedNames}（详见检查结果）`,
           });
         }
       } catch (validationError) {
@@ -452,11 +452,16 @@ export async function settleReviewAndAdvance(draftId: string): Promise<void> {
 }
 
 /**
- * 审查状态调和（协调循环兜底）：
- * 若审查会话已空闲但草稿仍停在 reviewing（SSE idle 事件丢失 / 订阅断开的间隙 /
- * 结算异常被上方兜底误判），按 /session/status 主动结算，避免「一直显示审查中」。
+ * 阶段状态调和（协调循环兜底）：
+ * 草稿停留在阶段状态（planning / coding / debugging / reviewing）但对应 opencode
+ * 会话实际已空闲时，按会话状态主动结算推进流水线，避免「一直显示运行中」。
+ * 覆盖两类场景：
+ * - SSE idle 事件丢失 / 订阅断开的间隙（原 reconcileReviewing）
+ * - 后端重启后：opencode 会话已空闲不会重发 idle 事件，草稿会永久停在阶段状态，
+ *   只能靠这里按 /session/status 兜底结算（planning→coding、coding→review、
+ *   debugging→结算重查、reviewing→结算审查）。
  */
-async function reconcileReviewing(): Promise<void> {
+async function reconcileStuckDrafts(): Promise<void> {
   let drafts;
   try {
     drafts = listDrafts();
@@ -464,24 +469,27 @@ async function reconcileReviewing(): Promise<void> {
     return;
   }
   for (const draft of drafts) {
-    if (draft.status !== 'reviewing' || !draft.review_session_id) continue;
+    if (!['planning', 'coding', 'debugging', 'reviewing'].includes(draft.status)) continue;
+    const sessionId = draft.status === 'reviewing' ? draft.review_session_id : draft.session_id;
+    if (!sessionId) continue;
     // 该审核会话已成功结算过（如 must_fix 等待用户点「自动修复」）→ 跳过，避免循环重结算
-    if (REVIEW_SETTLED_SESSION.get(draft.id) === draft.review_session_id) continue;
+    if (draft.status === 'reviewing' && REVIEW_SETTLED_SESSION.get(draft.id) === sessionId) continue;
     try {
       const client = opencode.getClient();
       const res = await client.session.status({
         query: { directory: draftWorkspace(draft.id) },
       });
       const statuses = (res.data ?? {}) as Record<string, { type?: string }>;
-      if (statuses[draft.review_session_id]?.type === 'idle') {
-        logger.info('events', '调和：审查会话已空闲但未结算，主动结算', {
+      if (statuses[sessionId]?.type === 'idle') {
+        logger.info('events', '调和：会话已空闲但草稿仍停留在阶段状态，主动结算', {
           draft_id: draft.id,
-          review_session_id: draft.review_session_id,
+          status: draft.status,
+          session_id: sessionId,
         });
-        await settleReviewAndAdvance(draft.id);
+        await settleSessionState(draft.id, sessionId, { type: 'session.idle' } as StudioEvent);
       }
     } catch (e) {
-      logger.debug('events', '审查状态调和失败（忽略）', {
+      logger.debug('events', '阶段状态调和失败（忽略）', {
         draft_id: draft.id,
         error: (e as Error).message,
       });
@@ -667,8 +675,8 @@ export async function startEventConsumer() {
     for (const workspace of wanted) {
       subscribeWorkspace(workspace);
     }
-    // 兜底：审查会话已空闲但结算被漏掉的草稿（SSE 间隙 / 事件丢失）
-    await reconcileReviewing();
+    // 兜底：阶段状态但会话已空闲的草稿（SSE 间隙 / 事件丢失 / 服务重启后）
+    await reconcileStuckDrafts();
     await Bun.sleep(2000);
   }
 }

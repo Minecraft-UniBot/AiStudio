@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDraft, updateDraft, readDraft } from '../src/drafts';
 import { parseReviewOutput, startReview, settleReview } from '../src/review';
-import { resolvePermissionTarget, opencode } from '../src/opencode';
+import { resolvePermissionTarget, normalizeProviders, opencode } from '../src/opencode';
 import { settleReviewAndAdvance } from '../src/events';
 import { config } from '../src/config';
 
@@ -142,6 +142,50 @@ describe('resolvePermissionTarget', () => {
     const { sessionId, tool } = resolvePermissionTarget(pending, 'perm-gone', 'ses_main');
     expect(sessionId).toBe('ses_main');
     expect(tool).toBe('');
+  });
+});
+
+describe('normalizeProviders（模型列表归一化）', () => {
+  test('models 为对象字典时正确展开（真实 opencode 结构）', () => {
+    // 与 opencode 1.18.4 /config/providers 真实返回一致的结构
+    const providers = normalizeProviders([
+      {
+        id: 'opencode',
+        name: 'OpenCode Zen',
+        source: 'custom',
+        env: ['OPENCODE_API_KEY'],
+        models: {
+          'hy3-free': {
+            id: 'hy3-free',
+            name: 'Hy3 Free',
+            api: { id: 'hy3-free', url: 'https://opencode.ai/zen/v1', npm: '@ai-sdk/openai-compatible' },
+            capabilities: {},
+          },
+          'deepseek-v4-flash-free': {
+            id: 'deepseek-v4-flash-free',
+            name: 'DeepSeek V4 Flash Free',
+            capabilities: {},
+          },
+        },
+      },
+    ]);
+    expect(providers).toHaveLength(1);
+    expect(providers[0]!.label).toBe('OpenCode Zen');
+    expect(providers[0]!.models).toEqual([
+      { id: 'hy3-free', label: 'Hy3 Free' },
+      { id: 'deepseek-v4-flash-free', label: 'DeepSeek V4 Flash Free' },
+    ]);
+  });
+
+  test('model 无 name 时退回字典 key 作为 label', () => {
+    const providers = normalizeProviders([
+      { id: 'p1', name: 'P1', models: { 'gpt-x': { id: 'gpt-x' } } },
+    ]);
+    expect(providers[0]!.models[0]).toEqual({ id: 'gpt-x', label: 'gpt-x' });
+  });
+
+  test('空 provider 列表返回空数组', () => {
+    expect(normalizeProviders([])).toEqual([]);
   });
 });
 

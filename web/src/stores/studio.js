@@ -25,6 +25,7 @@ export const useStudioStore = defineStore('studio', () => {
   const diff = ref(null)
   const todo = ref([])
   const options = ref({ providers: [], agents: [], review_enabled: true })
+  const optionsError = ref('')
   const connected = ref(false)
   const error = ref('')
   const pendingPermissions = ref([])
@@ -42,8 +43,10 @@ export const useStudioStore = defineStore('studio', () => {
   async function fetchOptions() {
     try {
       options.value = await api('/options')
-    } catch {
-      // 忽略（OpenCode 不可用时不阻塞）
+      optionsError.value = ''
+    } catch (e) {
+      // OpenCode 不可用/获取失败时保留提示，前端不再静默显示空模型列表
+      optionsError.value = e.message || '获取模型列表失败'
     }
   }
 
@@ -147,6 +150,21 @@ export const useStudioStore = defineStore('studio', () => {
 
   async function startDebug(id, options = {}) {
     return await api(`/drafts/${id}/debug`, { method: 'POST', body: options })
+  }
+
+  /** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI） */
+  async function debugValidation(id) {
+    return await api(`/drafts/${id}/debug`, { method: 'POST', body: { fix_validation: true } })
+  }
+
+  /** 手动重新执行机械校验（校验失败修复后 / 测试环境恢复后的重跑入口） */
+  async function checkValidation(id) {
+    return await api(`/drafts/${id}/check`, { method: 'POST' })
+  }
+
+  /** 触发后台同步 UniBot 测试环境（异步，完成后推送 unibot-env.updated） */
+  async function syncUnibotEnv() {
+    return await api('/unibot-env/sync', { method: 'POST' })
   }
 
   async function publish(id) {
@@ -265,6 +283,7 @@ export const useStudioStore = defineStore('studio', () => {
     diff,
     todo,
     options,
+    optionsError,
     connected,
     error,
     pendingPermissions,
@@ -287,6 +306,9 @@ export const useStudioStore = defineStore('studio', () => {
     startReview,
     fetchReview,
     startDebug,
+    debugValidation,
+    checkValidation,
+    syncUnibotEnv,
     publish,
     replyPermission,
     replyQuestion,

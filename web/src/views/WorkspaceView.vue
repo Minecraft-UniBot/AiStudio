@@ -234,6 +234,40 @@ async function autoFix(includeSuggestions = false) {
   }
 }
 
+/** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI，AI 修完会重跑校验） */
+async function fixValidation() {
+  repairing.value = true
+  try {
+    await store.debugValidation(draftId)
+    await store.fetchDraft(draftId)
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    repairing.value = false
+  }
+}
+
+/** 手动重新执行机械校验（校验失败修复后 / 测试环境恢复后的重跑入口） */
+async function checkValidation() {
+  try {
+    await store.checkValidation(draftId)
+    await store.fetchDraft(draftId)
+    toast_success('机械校验完成')
+  } catch (e) {
+    toast_error(e.message)
+  }
+}
+
+/** 触发后台同步 UniBot 测试环境（异步完成，完成后推送 unibot-env.updated） */
+async function syncEnv() {
+  try {
+    await store.syncUnibotEnv()
+    toast_success('已开始同步 UniBot 测试环境，完成后可重新校验')
+  } catch (e) {
+    toast_error(e.message)
+  }
+}
+
 // ===== 发布 =====
 function openPublish() {
   if (!canPublish.value) return
@@ -332,6 +366,13 @@ onUnmounted(() => {
       :primary-action="primaryAction"
       @back="router.push('/')"
     />
+
+    <!-- 后端错误横幅（校验失败 / 会话错误 / 熔断等）：任何状态都展示，
+         避免「审查通过但机械校验失败」这类状态退回 draft 后错误不可见、没有操作入口 -->
+    <div v-if="draft.error" class="workspace-banner danger">
+      <Icon icon="lucide:alert-triangle" width="14" />
+      <span>{{ draft.error }}</span>
+    </div>
 
     <!-- 手机端 Tab 切换（Plan 3.2） -->
     <nav class="mobile-tabs">
@@ -433,6 +474,9 @@ onUnmounted(() => {
                 :repairing="repairing"
                 @review="review"
                 @debug="autoFix"
+                @fix-validation="fixValidation"
+                @check-validation="checkValidation"
+                @sync-env="syncEnv"
               />
             </div>
 
@@ -507,6 +551,29 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* 后端错误横幅：横跨三栏顶部，始终可见 */
+.workspace-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  word-break: break-word;
+  flex-shrink: 0;
+}
+
+.workspace-banner.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-bottom: 1px solid #fecaca;
+}
+
+.workspace-banner :deep(svg) {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .panels {

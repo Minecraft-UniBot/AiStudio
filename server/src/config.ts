@@ -12,6 +12,16 @@ import type { StudioConfig } from './types';
 
 const DEFAULT_DATA_DIR = join(homedir(), '.unibot-studio');
 
+/**
+ * 资源目录基准（模拟 server/src 目录）：
+ * - 常规运行：本文件所在目录（server/src），prompts / skills / validation 位于其上一级
+ * - 单文件可执行版：启动器把内置资源解压到数据目录后，通过 UNIBOT_STUDIO_RES_DIR
+ *   指向解压出的 src 基准目录，供重定位 prompts / skills / validation / docs。
+ */
+export function resSrcDir(): string {
+  return process.env.UNIBOT_STUDIO_RES_DIR || import.meta.dir;
+}
+
 /** 从仓库根目录探测 UniBot 目录（支持被软链或拷贝到任意位置） */
 function detectUnibotDir(): string {
   // 1. 环境变量显式指定
@@ -132,7 +142,7 @@ export const config: StudioConfig = loadConfig();
 
 /** 文档白名单绝对路径数组（供安全约束文本与权限自动放行共用） */
 export function docsAllowlistPaths(): string[] {
-  const docsDir = join(import.meta.dir, '..', 'prompts', 'docs');
+  const docsDir = join(resSrcDir(), '..', 'prompts', 'docs');
   const files = [
     '开发插件.md',
     '扩展系统.md',
@@ -186,7 +196,7 @@ export function unibotEnvPython(): string {
 
 /** UniBot 校验脚本绝对路径（server/validation/validate_extension.py） */
 export function validationScriptPath(): string {
-  return join(import.meta.dir, '..', 'validation', 'validate_extension.py');
+  return join(resSrcDir(), '..', 'validation', 'validate_extension.py');
 }
 
 /** 初始化平台数据目录结构 */

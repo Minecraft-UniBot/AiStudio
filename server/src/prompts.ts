@@ -13,9 +13,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { config } from './config';
+import { config, resSrcDir } from './config';
 
-const PROMPTS_DIR = join(import.meta.dir, '..', 'prompts');
+const PROMPTS_DIR = join(resSrcDir(), '..', 'prompts');
 
 export interface PromptVersion {
   version: number;
