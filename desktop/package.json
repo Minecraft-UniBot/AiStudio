@@ -8,6 +8,7 @@
     "stage": "bun scripts/stage.ts",
     "fetch:opencode": "bun scripts/fetch-opencode.ts",
     "preview": "bun scripts/preview.ts",
+    "build:portable": "bun scripts/build-portable.ts",
     "dev": "bun scripts/stage.ts && bun hutch electrobun dev --watch",
     "build:canary": "bun scripts/stage.ts && bun hutch electrobun build --env=canary",
     "build:production": "bun scripts/stage.ts && bun hutch electrobun build --env=production",
