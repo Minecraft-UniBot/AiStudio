@@ -24,7 +24,7 @@ export const useStudioStore = defineStore('studio', () => {
   const files = ref([])
   const diff = ref(null)
   const todo = ref([])
-  const options = ref({ providers: [], agents: [], review_enabled: true })
+  const options = ref({ providers: [], agents: [], test_tools_enabled: true })
   const optionsError = ref('')
   const connected = ref(false)
   const error = ref('')
@@ -139,20 +139,8 @@ export const useStudioStore = defineStore('studio', () => {
     return data.content
   }
 
-  // ---- 审查 / 发布 ----
-  async function startReview(id) {
-    return await api(`/drafts/${id}/review`, { method: 'POST' })
-  }
-
-  async function fetchReview(id) {
-    return await api(`/drafts/${id}/review`)
-  }
-
-  async function startDebug(id, options = {}) {
-    return await api(`/drafts/${id}/debug`, { method: 'POST', body: options })
-  }
-
-  /** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI） */
+  // ---- 校验 / 发布 ----
+  /** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI 编码会话） */
   async function debugValidation(id) {
     return await api(`/drafts/${id}/debug`, { method: 'POST', body: { fix_validation: true } })
   }
@@ -208,10 +196,10 @@ export const useStudioStore = defineStore('studio', () => {
   // ---- 状态刷新 ----
   async function refreshCurrent(id) {
     try {
-      const before = currentDraft.value?.review_revision
+      const before = currentDraft.value?.validation_revision
       await fetchDraft(id)
-      // 审查结果或摘要变化时刷新消息与文件
-      if (before !== currentDraft.value?.review_revision) {
+      // 校验结果或摘要变化时刷新消息与文件
+      if (before !== currentDraft.value?.validation_revision) {
         fetchMessages(id).catch(() => {})
         fetchFiles(id).catch(() => {})
       }
@@ -303,9 +291,6 @@ export const useStudioStore = defineStore('studio', () => {
     fetchTodo,
     fetchFiles,
     fetchFileContent,
-    startReview,
-    fetchReview,
-    startDebug,
     debugValidation,
     checkValidation,
     syncUnibotEnv,

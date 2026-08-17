@@ -77,6 +77,7 @@ function collectAssets(): Array<{ rel: string; abs: string }> {
     { dir: join(VENDOR, 'server', 'prompts'), relPrefix: 'prompts' },
     { dir: join(VENDOR, 'server', 'skills'), relPrefix: 'skills' },
     { dir: join(VENDOR, 'server', 'validation'), relPrefix: 'validation' },
+    { dir: join(VENDOR, 'server', 'plugins'), relPrefix: 'plugins' },
   ];
   const assets: Array<{ rel: string; abs: string }> = [];
   for (const { dir, relPrefix } of sources) {

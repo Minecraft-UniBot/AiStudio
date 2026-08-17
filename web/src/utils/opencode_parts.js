@@ -31,8 +31,6 @@ export function checkpoint_of(message) {
   if (!text.includes('后端安全约束')) return null
   // 阶段识别：按各阶段提示词正文特征（模板可编辑，用宽松关键词兜底）
   if (/第二阶段|实现编码/.test(text)) return { stage: 'coding', label: '进入编码阶段' }
-  if (/修复工程师|问题单/.test(text)) return { stage: 'debugging', label: '进入修复阶段' }
-  if (/审查员|第三阶段|只读审查/.test(text)) return { stage: 'reviewing', label: '进入审查阶段' }
   if (/第一阶段|需求规划/.test(text)) return { stage: 'planning', label: '进入规划阶段' }
   return { stage: '', label: '编排检查点' }
 }

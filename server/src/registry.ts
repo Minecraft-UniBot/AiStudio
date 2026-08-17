@@ -15,9 +15,9 @@ export interface FeatureModule {
 
 const MODULES: FeatureModule[] = [
   {
-    id: 'review',
-    name: 'AI 审核与调试',
-    description: '生成后由独立 AI 审核并自动修复问题',
+    id: 'test_tools',
+    name: '测试工具（OpenCode 插件）',
+    description: '生成会话内通过插件部署/加载/测试扩展到共享测试环境',
     implemented: true,
   },
   {

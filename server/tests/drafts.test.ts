@@ -16,11 +16,8 @@ function makeDraft(partial: Partial<DraftMeta>): DraftMeta {
     owner_id: 'admin',
     status: 'draft',
     session_id: null,
-    review_session_id: null,
     model: null,
     agent: 'build',
-    review: null,
-    review_revision: null,
     validation: null,
     validation_revision: null,
     created_at: new Date().toISOString(),
@@ -49,8 +46,8 @@ describe('assertPromptable', () => {
     expect(() => assertPromptable(makeDraft({ status: 'ready' }))).not.toThrow();
   });
 
-  test('planning / coding / reviewing / debugging 禁止发消息', () => {
-    for (const status of ['planning', 'coding', 'reviewing', 'debugging']) {
+  test('planning / coding 禁止发消息', () => {
+    for (const status of ['planning', 'coding']) {
       expect(
         () => assertPromptable(makeDraft({ status: status as DraftMeta['status'] })),
         `状态 ${status} 应禁止发消息`,

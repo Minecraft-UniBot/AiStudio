@@ -1,17 +1,17 @@
 # UniBot Extension Studio
 
-基于 OpenCode Server 的 UniBot 扩展开发平台：让不会写代码的用户用自然语言创建、检查、审核并发布 UniBot 原生扩展。
+基于 OpenCode Server 的 UniBot 扩展开发平台：让不会写代码的用户用自然语言创建、检查并发布 UniBot 原生扩展。
 
-> 实现状态：对应 `Studio/Plan.md` 的第一版核心闭环（创建 → 生成 → 校验 → 审核 → 一键发布）。
+> 实现状态：对应 `Studio/AGENT.md` 的第一版核心闭环（创建 → 生成（AI 用测试工具自测）→ 机械校验 → 一键发布）。
 
 ## 功能
 
 - **创建草稿**：从空白脚手架创建 `api` / `command` 类型扩展，一句话描述需求
 - **AI 协作开发**：OpenCode 在隔离草稿工作区中生成代码，实时展示消息、推理与工具调用
 - **后台自动校验**：路径检查、`Extension.toml` 严格校验、Python 语法与 import 边界、Ruff、pytest、Loader 绑定、依赖声明
-- **AI 审核与自动修复**：独立审核会话（只读）输出结构化问题单，调试会话修复，最多 3 轮且无进展熔断
+- **AI 自测（OpenCode 插件测试工具）**：编码时 AI 用 `unibot_*` 工具把扩展部署到共享测试环境并加载、运行测试，当场修复
 - **一键发布**：核对文件摘要后原子交付到 `UniBot/Extensions/<id>/`，已存在则拒绝覆盖
-- **可恢复**：草稿元数据、会话、消息、校验与审核结果落盘，刷新页面不丢失进度
+- **可恢复**：草稿元数据、会话、消息、校验结果落盘，刷新页面不丢失进度
 
 ## 目录结构
 
@@ -20,10 +20,10 @@ Studio/
 ├── server/                      # 后端：Bun + TypeScript
 │   ├── src/
 │   │   ├── index.ts             # REST / WebSocket 路由与平台认证
-│   │   ├── opencode.ts          # OpenCode 网关（子进程 + SDK）
+│   │   ├── opencode.ts          # OpenCode 网关（子进程 + SDK + 插件/超时注入）
 │   │   ├── drafts.ts            # 草稿 CRUD、脚手架、路径安全、文件摘要
 │   │   ├── validation.ts        # 校验流水线编排
-│   │   ├── review.ts            # AI 审核与调试编排
+│   │   ├── test_tools.ts        # 测试工具后端：部署/加载/测试/日志
 │   │   ├── publishing.ts        # 原子发布器
 │   │   ├── events.ts            # SSE 事件归一化与 WebSocket 广播
 │   │   └── config.ts            # 平台配置

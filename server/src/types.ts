@@ -4,20 +4,17 @@
  * 对应 Plan.md 第四章「状态模型」与第六章「后端 API 草案」。
  */
 
-/** 草稿主状态机（三阶段：规划 → 编码 → 审查） */
+/** 草稿主状态机（规划 → 编码 → 机械校验 → 发布；编码阶段 AI 用测试工具自测） */
 export type DraftStatus =
   | 'draft'       // 已创建，未开始
   | 'planning'    // 规划中（AI 先询问需求，输出规划）
-  | 'coding'      // 编码中（自动加载对应 skill，实现代码）
-  | 'reviewing'   // 审查中（独立审核 AI 只读审查）
-  | 'debugging'   // 修复中（审查发现问题后的自动修复）
-  | 'ready'       // 审查通过，可发布
+  | 'coding'      // 编码中（自动加载对应 skill，实现代码并用测试工具自测）
+  | 'ready'       // 机械校验通过，可发布
   | 'published'   // 已发布（只读）
-  | 'failed'      // 连续无进展 / 超出轮次
   | 'error';      // 会话丢失等可恢复错误
 
 /** 流水线阶段（与草稿主状态机正交：status 可被 abort/聊天等交互置回 draft，phase 保留用于续接流转） */
-export type PipelinePhase = 'planning' | 'coding' | 'reviewing' | 'debugging';
+export type PipelinePhase = 'planning' | 'coding';
 
 /** 扩展类型（第一版仅 api / command） */
 export type ExtensionType = 'api' | 'command' | 'renderer' | 'template' | 'resources';
@@ -27,42 +24,6 @@ export interface ModelChoice {
   provider_id: string;
   model_id: string;
   label?: string;
-}
-
-/** AI 审核问题 */
-export type IssueSeverity = 'must_fix' | 'suggestion' | 'passed';
-
-export interface ReviewIssue {
-  id: string;
-  severity: IssueSeverity;
-  title: string;
-  detail: string;
-  file?: string;
-  suggestion?: string;
-  /** 修复后由调试阶段回填验证结果 */
-  verified?: boolean;
-}
-
-/** 调试轮次记录（持久化，用于无进展熔断） */
-export interface ReviewRound {
-  round: number;
-  /** 调试开始前的文件摘要 */
-  revision_before: string;
-  /** 调试结束后的文件摘要（settle 时回填） */
-  revision_after?: string;
-  must_fix_count: number;
-}
-
-/** 审核结果 */
-export interface ReviewResult {
-  round: number;
-  max_rounds: number;
-  status: 'passed' | 'needs_confirmation' | 'failed';
-  issues: ReviewIssue[];
-  summary: string;
-  /** 调试轮次历史（每次 startDebugging 追加一条） */
-  rounds: ReviewRound[];
-  updated_at: string;
 }
 
 /** 校验步骤 */
@@ -115,17 +76,13 @@ export interface DraftMeta {
    */
   phase?: PipelinePhase | null;
   session_id: string | null;
-  review_session_id: string | null;
   model: ModelChoice | null;
   agent: string;
-  review: ReviewResult | null;
-  /** 最近一次审查通过时的文件摘要（SHA-256），发布前必须核对 */
-  review_revision: string | null;
   /** 规划产物（PLAN.md 内容摘要，供前端展示） */
   plan_summary?: string | null;
-  /** 兼容旧版草稿：校验结果（新流程不再生成） */
+  /** 机械校验结果 */
   validation: ValidationRun | null;
-  /** 最近一次通过检查的文件摘要（SHA-256），兼容旧版 */
+  /** 最近一次通过检查的文件摘要（SHA-256），发布前必须核对 */
   validation_revision: string | null;
   /**
    * 最近一次回退的目标消息 ID（OpenCode revert 是「暂存式」：文件立即恢复，
@@ -158,7 +115,6 @@ export type StudioEvent =
   | { type: 'question.replied'; draft_id: string; question_id: string }
   | { type: 'question.rejected'; draft_id: string; question_id: string }
   | { type: 'draft.updated'; draft_id: string; status: DraftStatus }
-  | { type: 'review.updated'; draft_id: string; review: ReviewResult }
   | { type: 'validation.updated'; draft_id: string; run: ValidationRun }
   | { type: 'unibot-env.updated'; status: UnibotEnvStatus }
   | { type: 'draft.published'; draft_id: string };
@@ -217,7 +173,7 @@ export interface ToolEntry {
   id: string;
   enabled: boolean;
   default_permission: 'allow' | 'ask' | 'reject';
-  phases: Array<'generate' | 'review' | 'debug'>;
+  phases: Array<'generate'>;
   note?: string;
 }
 
@@ -250,6 +206,10 @@ export interface StudioConfig {
     bin: string;
     version: string;
     data_dir: string;
+    /** LLM 整次请求超时（毫秒），注入 provider.options.timeout */
+    timeout_ms: number;
+    /** LLM 流式块间隔超时（毫秒），注入 provider.options.chunkTimeout */
+    chunk_timeout_ms: number;
   };
   /** UniBot 测试环境：GitHub Releases 来源与本地目录 */
   unibot_env: {
@@ -265,14 +225,13 @@ export interface StudioConfig {
     test_dir: string;
   };
   features: {
-    review: boolean;
+    test_tools: boolean;
     mc_test_environment: boolean;
     market_publish: boolean;
     git_integration: boolean;
   };
   defaults: {
     agent: string;
-    max_review_rounds: number;
   };
   auth: {
     /** 平台访问口令（首次启动自动生成，可被环境变量 UNIBOT_STUDIO_PASSWORD 覆盖） */

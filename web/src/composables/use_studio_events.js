@@ -99,9 +99,6 @@ export function use_studio_events() {
           break
       }
     }
-    if (event.type === 'review.updated' && event.draft_id === store.currentDraft?.id) {
-      store.refreshCurrent(event.draft_id)
-    }
     // 测试环境同步进度（非草稿级事件）：刷新平台状态
     if (event.type === 'unibot-env.updated') {
       store.fetchStatus()

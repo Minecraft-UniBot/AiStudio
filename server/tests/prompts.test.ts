@@ -5,9 +5,9 @@ import { describe, expect, test } from 'bun:test';
 import { renderPrompt, listPrompts, getPrompt } from '../src/prompts';
 
 describe('prompts 渲染', () => {
-  test('模板存在（system / planning / scaffold / review / debugging）', () => {
+  test('模板存在（system / planning / scaffold / summary）', () => {
     const names = listPrompts().map((p) => p.name);
-    for (const required of ['system', 'planning', 'scaffold', 'review', 'debugging', 'summary']) {
+    for (const required of ['system', 'planning', 'scaffold', 'summary']) {
       expect(names).toContain(required);
     }
   });
@@ -29,11 +29,21 @@ describe('prompts 渲染', () => {
     expect(out).not.toMatch(/\{\{[^}]+\}\}/);
   });
 
-  test('system 模板包含三阶段说明', () => {
+  test('system 模板包含两阶段说明与自测要求', () => {
     const out = renderPrompt('system', { allowlist: '/tmp/ws', market_path: '/tmp/market.json' });
     expect(out).toContain('规划');
     expect(out).toContain('编码');
-    expect(out).toContain('审查');
+    expect(out).toContain('unibot_deploy');
+  });
+
+  test('scaffold 模板要求编码后用测试工具自测', () => {
+    const out = renderPrompt('scaffold', {
+      extension_id: 'TestExt',
+      allowlist: '/tmp/ws',
+      market_path: '/tmp/market.json',
+    });
+    expect(out).toContain('unibot_deploy');
+    expect(out).toContain('unibot_run_tests');
   });
 
   test('planning 模板要求先提问', () => {
@@ -48,12 +58,6 @@ describe('prompts 渲染', () => {
     });
     expect(out).toContain('先提问澄清');
     expect(out).toContain('PLAN.md');
-  });
-
-  test('review 模板输出 JSON 格式要求', () => {
-    const out = renderPrompt('review', { user_request: '测试' });
-    expect(out).toContain('"summary"');
-    expect(out).toContain('"severity"');
   });
 
   test('getPrompt 返回最新版本', () => {

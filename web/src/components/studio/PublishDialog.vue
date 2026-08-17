@@ -1,19 +1,16 @@
 <script setup>
 // 发布确认对话框（Plan 3.4：只列出功能摘要、使用方式、配置项和重启提示）
-import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import Dialog from '@/components/ui/Dialog.vue'
 
 const open = defineModel({ type: Boolean, default: false })
 
-const props = defineProps({
+defineProps({
   draft: { type: Object, required: true },
   publishing: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['confirm'])
-
-const reviewSummary = computed(() => props.draft.review?.summary ?? '')
 </script>
 
 <template>
@@ -38,26 +35,22 @@ const reviewSummary = computed(() => props.draft.review?.summary ?? '')
         <span class="label">类型</span>
         <span class="value">{{ draft.types.join('、') }}</span>
       </div>
-      <div class="summary-row">
-        <span class="label">审核摘要</span>
-        <span class="value">{{ reviewSummary || '—' }}</span>
-      </div>
       <details class="tech-detail">
         <summary>
           <Icon icon="lucide:chevron-down" width="13" />
-          技术详情（审查结果与文件摘要）
+          技术详情（机械校验与文件摘要）
         </summary>
         <div class="tech-body">
-          <p v-for="issue in draft.review?.issues ?? []" :key="issue.id" class="tech-step">
+          <p class="tech-step">
             <Icon
-              :icon="issue.severity === 'passed' ? 'lucide:check' : 'lucide:info'"
+              :icon="draft.validation?.status === 'passed' ? 'lucide:check' : 'lucide:info'"
               width="12"
-              :class="issue.severity"
+              :class="draft.validation?.status === 'passed' ? 'passed' : ''"
             />
-            {{ issue.title }}
+            机械校验：{{ draft.validation?.status === 'passed' ? '通过' : '未通过/未执行' }}
           </p>
           <p class="tech-revision mono">
-            文件摘要 {{ (draft.review_revision ?? '').slice(0, 12) }}…
+            文件摘要 {{ (draft.validation_revision ?? '').slice(0, 12) }}…
           </p>
         </div>
       </details>

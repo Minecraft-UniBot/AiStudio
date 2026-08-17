@@ -68,6 +68,7 @@ run(
 copyDir(join(SERVER_DIR, "prompts"), join(VENDOR_SERVER, "prompts"), "prompts");
 copyDir(join(SERVER_DIR, "skills"), join(VENDOR_SERVER, "skills"), "skills");
 copyDir(join(SERVER_DIR, "validation"), join(VENDOR_SERVER, "validation"), "validation");
+copyDir(join(SERVER_DIR, "plugins"), join(VENDOR_SERVER, "plugins"), "plugins");
 
 // ---- 2. 前端构建产物 ----
 const webDist = join(WEB_DIR, "dist");

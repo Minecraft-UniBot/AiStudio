@@ -25,10 +25,12 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { mkdirSync, existsSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createTcpServer } from 'node:net';
 import { join } from 'node:path';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
-import { config } from './config';
+import { config, resSrcDir } from './config';
+import { issueToken } from './auth';
 import { logger } from './logger';
 
 const OPENCODE_HEALTH_RETRIES = 60;
@@ -247,6 +249,93 @@ class OpenCodeGateway {
     return this.status;
   }
 
+  /**
+   * 把 Studio 测试工具插件同步到隔离配置目录的插件目录（AGENT.md 3.5）：
+   * opencode 全局插件目录 = <opencode data>/config/opencode/plugins/，
+   * 目录内文件在启动时自动加载（ConfigPlugin.load 扫描 {plugin,plugins}/*.{ts,js}）。
+   *
+   * 插件源码位于 server/plugins/，用 Bun.build 打包为自包含 JS（内联
+   * @opencode-ai/plugin 与 zod），避免运行时依赖 node_modules 解析。
+   */
+  private async syncPlugins(): Promise<void> {
+    try {
+      const pluginDir = join(config.opencode.data_dir, 'config', 'opencode', 'plugins');
+      const source = join(resSrcDir(), '..', 'plugins', 'unibot-tools.ts');
+      if (!existsSync(source)) {
+        logger.warn('opencode', '未找到测试工具插件源码，跳过插件注册', { source });
+        return;
+      }
+      mkdirSync(pluginDir, { recursive: true });
+      // 清理旧产物后重新打包，保证与当前源码一致（Bun.build 不覆盖同路径产物会报错）
+      for (const name of readdirSync(pluginDir)) {
+        if (name.startsWith('unibot-tools')) rmSync(join(pluginDir, name), { force: true });
+      }
+      const out = await Bun.build({
+        entrypoints: [source],
+        outdir: pluginDir,
+        naming: 'unibot-tools.js',
+        target: 'bun',
+        format: 'esm',
+        minify: false,
+        sourcemap: 'none',
+        external: [],
+      });
+      if (!out.success) {
+        logger.error('opencode', '测试工具插件打包失败，测试工具将不可用', {
+          logs: out.logs.map((l) => l.message),
+        });
+        return;
+      }
+      logger.info('opencode', '测试工具插件已注册', {
+        plugin: join(pluginDir, 'unibot-tools.js'),
+        size: statSync(join(pluginDir, 'unibot-tools.js')).size,
+      });
+    } catch (e) {
+      logger.error('opencode', '同步测试工具插件失败，测试工具将不可用', {
+        error: (e as Error).message,
+      });
+    }
+  }
+
+  /**
+   * 注入 LLM 超时配置到隔离配置目录（AGENT.md 3.5 需求）：
+   * 思考模型长时间无输出时，opencode 默认的 chunkTimeout（30s）会提前掐断请求。
+   * 在 <opencode data>/config/opencode/opencode.jsonc 写入常见 provider 的
+   * options.timeout / options.chunkTimeout（只补未显式配置的项，优先保留用户配置）。
+   */
+  private syncTimeoutConfig(): void {
+    try {
+      const configDir = join(config.opencode.data_dir, 'config', 'opencode');
+      mkdirSync(configDir, { recursive: true });
+      const file = join(configDir, 'opencode.jsonc');
+      let cfg: Record<string, unknown> = { $schema: 'https://opencode.ai/config.json' };
+      try {
+        const text = existsSync(file) ? readFileSync(file, 'utf-8') : '';
+        const parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+        if (parsed && typeof parsed === 'object') cfg = parsed;
+      } catch {
+        // 配置损坏则从默认开始
+      }
+      const provider = (cfg.provider as Record<string, unknown>) ?? {};
+      const timeout = config.opencode.timeout_ms;
+      const chunkTimeout = config.opencode.chunk_timeout_ms;
+      for (const id of ['anthropic', 'openai', 'deepseek', 'openrouter', 'gemini', 'azure', 'github-copilot']) {
+        const p = (provider[id] as Record<string, unknown>) ?? {};
+        const options = (p.options as Record<string, unknown>) ?? {};
+        // 用户已显式配置的超时以用户为准；未配置则注入平台默认（调大）
+        if (options.timeout === undefined) options.timeout = timeout;
+        if (options.chunkTimeout === undefined) options.chunkTimeout = chunkTimeout;
+        p.options = options;
+        provider[id] = p;
+      }
+      cfg.provider = provider;
+      writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
+      logger.info('opencode', `已注入 LLM 超时配置（timeout=${timeout}ms, chunkTimeout=${chunkTimeout}ms）`);
+    } catch (e) {
+      logger.error('opencode', '注入 LLM 超时配置失败', { error: (e as Error).message });
+    }
+  }
+
   private async launch() {
     this.ensureParentExitCleanup();
     const bin = config.opencode.bin;
@@ -256,18 +345,26 @@ class OpenCodeGateway {
     this.password = process.env.OPENCODE_SERVER_PASSWORD ?? randomBytes(24).toString('base64url');
     // 独立数据/配置目录（通过 XDG 变量隔离，不依赖固定 CLI 参数）
     const dataDir = config.opencode.data_dir;
+    // 注入 LLM 超时配置（必须在 opencode 启动前完成，opencode 启动时读取）
+    this.syncTimeoutConfig();
+    // 注册测试工具插件（必须在 opencode 启动前完成：插件在启动时扫描加载）
+    await this.syncPlugins();
 
     const args = [
       'serve',
       '--hostname', '127.0.0.1',
       '--port', String(this.port),
     ];
+    // 插件回调 Studio API 所需的连接信息（AGENT.md 3.5：插件只做参数转发，操作由后端执行）
+    const pluginApiBase = `http://127.0.0.1:${config.port}`;
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       OPENCODE_SERVER_PASSWORD: this.password,
       XDG_DATA_HOME: join(dataDir, 'data'),
       XDG_CONFIG_HOME: join(dataDir, 'config'),
       XDG_CACHE_HOME: join(dataDir, 'cache'),
+      UNIBOT_STUDIO_API_URL: pluginApiBase,
+      UNIBOT_STUDIO_API_TOKEN: issueToken(365 * 24 * 60 * 60 * 1000),
     };
 
     this.process = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });

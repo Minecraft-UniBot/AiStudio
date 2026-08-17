@@ -6,26 +6,17 @@ import MessagePart from './MessagePart.vue'
 import PermissionRequest from './PermissionRequest.vue'
 import Button from '@/components/ui/Button.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { use_rotating_slogan, REVIEW_SLOGANS } from '@/composables/use_rotating_slogan'
 
 const props = defineProps({
   draftId: { type: String, required: true },
   messages: { type: Array, default: () => [] },
   pendingPermissions: { type: Array, default: () => [] },
   pendingQuestions: { type: Array, default: () => [] },
-  /** 会话忙碌（生成/修复/调试中），发送按钮切换为停止 */
+  /** 会话忙碌（规划/编码中），发送按钮切换为停止 */
   busy: { type: Boolean, default: false },
-  /** 审查进行中：对话区底部显示轮换等待标语 */
-  reviewing: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['send', 'stop', 'reply-permission', 'reply-question', 'reject-question', 'revert-message'])
-
-/** 审查等待标语（与审查面板共用文案，独立轮换） */
-const { slogan: reviewSlogan } = use_rotating_slogan(
-  computed(() => props.reviewing),
-  REVIEW_SLOGANS,
-)
 
 const input = ref('')
 const sending = ref(false)
@@ -183,12 +174,6 @@ function onKeydown(e) {
       <div ref="messageEl" />
     </div>
 
-    <!-- 审查进行中：对话区底部的等待标语（不让用户干等） -->
-    <div v-if="reviewing" class="review-hint">
-      <Icon icon="lucide:brain" width="13" class="spin" />
-      <span>AI 正在审查你的扩展 — {{ reviewSlogan }}</span>
-    </div>
-
     <!-- 待处理授权 / 提问：固定在输入框上方，AI 卡住时无需滚动即可处理 -->
     <div v-if="pendingPermissions.length || pendingQuestions.length" class="pending-bar">
       <div class="pending-bar-head">
@@ -309,31 +294,6 @@ function onKeydown(e) {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-
-/* ---------- 审查进行中：底部等待标语 ---------- */
-.review-hint {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-top: 1px solid var(--border);
-  background: var(--surface-sunken);
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.review-hint .spin {
-  animation: spin 1s linear infinite;
-  color: var(--accent);
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* ---------- 待处理授权 / 提问：固定在输入框上方的处理条 ---------- */

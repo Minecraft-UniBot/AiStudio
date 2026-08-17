@@ -12,17 +12,25 @@ import { config, resSrcDir } from './config';
 import { DraftError, computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
 import { logger } from './logger';
 import { getUnibotEnvStatus, runProcess } from './unibot_env';
-import type { ReviewIssue, ValidationRun, ValidationStepId, ValidationStepResult } from './types';
+import type { ValidationRun, ValidationStepId, ValidationStepResult } from './types';
 
 /** 同一草稿并发校验锁 */
 const VALIDATION_LOCKS = new Set<string>();
+
+/** 校验失败问题单（供「让 AI 修复校验问题」使用） */
+export interface ValidationIssue {
+  id: string;
+  severity: 'must_fix';
+  title: string;
+  detail: string;
+}
 
 /**
  * 把校验失败步骤转为可交给 AI 修复的问题单（提供「修复条件」）。
  * 环境类（id='env'）与中断类（id='interrupted'）步骤属于基础设施/运行问题，
  * AI 无法修复，予以排除；全部失败均为此类时返回空数组，调用方应引导重跑校验。
  */
-export function validationFixIssues(run: ValidationRun): ReviewIssue[] {
+export function validationFixIssues(run: ValidationRun): ValidationIssue[] {
   return (run.steps ?? [])
     .filter(
       (step) => step.status === 'failed' && step.id !== 'env' && step.id !== 'interrupted',

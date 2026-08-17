@@ -4,11 +4,11 @@
  * 对应 Plan.md 第六章「后端 API 草案」；错误统一使用 { code, data, message } 包装。
  * 安全：所有接口要求管理员权限（Bearer token），OpenCode 网关仅监听 127.0.0.1。
  */
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { ensureDataDirs, saveConfig, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
 import { config } from './config';
+import { issueToken, verifyToken } from './auth';
 import { opencode, resolvePermissionTarget, normalizeProviders } from './opencode';
 import { logger } from './logger';
 import { trackSession, untrackDraft } from './sessions';
@@ -28,8 +28,6 @@ import {
   sanitizeTypes,
   updateDraft,
 } from './drafts';
-import { startReview } from './review';
-import { startDebugging } from './debugging';
 import { publishDraft, PublishError } from './publishing';
 import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './events';
 import { getTools, updateTools } from './tools';
@@ -37,40 +35,20 @@ import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, saveP
 import { buildSecurity } from './pipeline';
 import { ensureUnibotEnv, getUnibotEnvStatus, syncUnibotEnv } from './unibot_env';
 import { runValidation, validationFixIssues } from './validation';
+import {
+  TestToolsError,
+  deployToTestEnv,
+  loadInTestEnv,
+  readTestLog,
+  runTestsInTestEnv,
+  testEnvOverview,
+  undeployFromTestEnv,
+  validateDraft,
+} from './test_tools';
 import { assertFeatureEnabled } from './registry';
 import type { DraftMeta } from './types';
 
-// ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效） =====
-const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 天
-
-function signTokenPayload(payload: string): string {
-  return createHmac('sha256', config.auth.token_secret).update(payload).digest('base64url');
-}
-
-function issueToken(): string {
-  const payload = Buffer.from(
-    JSON.stringify({ iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS }),
-  ).toString('base64url');
-  return `${payload}.${signTokenPayload(payload)}`;
-}
-
-function verifyToken(token: string | null | undefined): boolean {
-  if (!token) return false;
-  const parts = token.split('.');
-  if (parts.length !== 2) return false;
-  const [payload, sig] = parts as [string, string];
-  const expected = Buffer.from(signTokenPayload(payload));
-  const actual = Buffer.from(sig);
-  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return false;
-  try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8')) as {
-      exp?: number;
-    };
-    return typeof data.exp === 'number' && data.exp >= Date.now();
-  } catch {
-    return false;
-  }
-}
+// ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效；签发/校验见 auth.ts） =====
 
 function isAuthorized(req: Request): boolean {
   const auth = req.headers.get('authorization') ?? '';
@@ -152,6 +130,66 @@ async function handleRequest(req: Request): Promise<Response> {
     return json(getUnibotEnvStatus());
   }
 
+  // ---- 测试工具（OpenCode 插件回调，对应 AGENT.md 3.5） ----
+  // 插件运行在 opencode 进程内，只转发 workspace + extension_id；所有文件/子进程操作
+  // 由后端执行（test_tools.ts），路径校验与「只写测试环境」约束在 test_tools.ts 内。
+  const testMatch = path.match(/^\/api\/studio\/test\/([a-z-]+)$/);
+  if (testMatch && req.method === 'POST') {
+    const action = testMatch[1]!;
+    try {
+      assertFeatureEnabled('test_tools');
+      const body = (await req.json().catch(() => ({}))) as {
+        workspace?: string;
+        draft_id?: string;
+        extension_id?: string;
+        lines?: number;
+      };
+      const ref = { workspace: body.workspace ?? '', draft_id: body.draft_id ?? '' };
+      const extensionId = body.extension_id ?? '';
+      switch (action) {
+        case 'env': {
+          return json(testEnvOverview());
+        }
+        case 'sync': {
+          void syncUnibotEnv().then((status) => broadcast({ type: 'unibot-env.updated', status }));
+          return json(testEnvOverview());
+        }
+        case 'deploy': {
+          const result = deployToTestEnv(ref, extensionId);
+          return json(result);
+        }
+        case 'undeploy': {
+          const result = undeployFromTestEnv(ref, extensionId);
+          return json(result);
+        }
+        case 'load': {
+          const result = await loadInTestEnv(ref, extensionId);
+          return json(result);
+        }
+        case 'logs': {
+          return json(readTestLog(extensionId, Math.min(Math.max(body.lines ?? 50, 1), 500)));
+        }
+        case 'run-tests': {
+          const result = await runTestsInTestEnv(ref, extensionId);
+          return json(result);
+        }
+        case 'validate': {
+          const result = await validateDraft(ref, extensionId);
+          return json(result);
+        }
+        default:
+          return errorJson('未知测试工具动作', 404, 404);
+      }
+    } catch (e) {
+      if (e instanceof TestToolsError) return errorJson(e.message, 1, 400);
+      const status =
+        (e as Error & { status?: number }).status ??
+        (e as Error & { cause?: { status?: number } }).cause?.status;
+      if (status) return errorJson((e as Error).message, 1, status);
+      return errorJson((e as Error).message, 1, 400);
+    }
+  }
+
   if (path === '/api/studio/options' && req.method === 'GET') {
     try {
       const client = opencode.getClient();
@@ -166,7 +204,7 @@ async function handleRequest(req: Request): Promise<Response> {
       const agents = (agentsRes.data as Array<{ name?: string }> ?? [])
         .map((a) => String(a.name ?? ''))
         .filter(Boolean);
-      return json({ providers, agents, review_enabled: config.features.review });
+      return json({ providers, agents, test_tools_enabled: config.features.test_tools });
     } catch (e) {
       return errorJson(`获取模型/Agent 失败：${(e as Error).message}`, 1, 503);
     }
@@ -190,13 +228,13 @@ async function handleRequest(req: Request): Promise<Response> {
       if (!body.extension_id || !body.name || !body.description) {
         return errorJson('缺少必填字段（extension_id / name / description）');
       }
-      // 全局并发限制（Plan 8.2）：同一管理员同时最多一个规划/编码/修复任务
+      // 全局并发限制（Plan 8.2）：同一管理员同时最多一个规划/编码任务
       const active = listDrafts().filter((d) =>
-        ['planning', 'coding', 'debugging'].includes(d.status),
+        ['planning', 'coding'].includes(d.status),
       );
       if (active.length > 0) {
         return errorJson(
-          `已有草稿「${active[0]!.name}」正在规划/编码/修复中，请先等待其完成`,
+          `已有草稿「${active[0]!.name}」正在规划/编码中，请先等待其完成`,
           1,
           409,
         );
@@ -332,7 +370,7 @@ async function handleRequest(req: Request): Promise<Response> {
             // 状态恢复：abort 后用户重新发消息视为「继续当前阶段」，按 phase 恢复 status，
             // 否则流水线在会话再次空闲时不会自动进入下一阶段（planning→coding 等）。
             const resumeStatus =
-              draft.phase === 'planning' || draft.phase === 'coding' || draft.phase === 'debugging'
+              draft.phase === 'planning' || draft.phase === 'coding'
                 ? draft.phase
                 : 'draft';
             updateDraft(draftId, {
@@ -362,10 +400,10 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'revert': {
           // 回退到某条用户消息之前：OpenCode 原生 revert（恢复文件状态 + 对话记录），
-          // 之后旧校验/审核结果一律失效，草稿回到 draft 状态等待重新生成。
+          // 之后旧校验结果一律失效，草稿回到 draft 状态等待重新生成。
           if (req.method === 'POST' && draft.session_id) {
-            if (['planning', 'coding', 'debugging', 'reviewing'].includes(draft.status)) {
-              return errorJson('当前正在规划/编码/审查中，请先停止或等待完成后再回退', 1, 409);
+            if (['planning', 'coding'].includes(draft.status)) {
+              return errorJson('当前正在规划/编码中，请先停止或等待完成后再回退', 1, 409);
             }
             const body = (await req.json()) as { message_id?: string };
             if (!body.message_id) return errorJson('缺少 message_id');
@@ -383,14 +421,12 @@ async function handleRequest(req: Request): Promise<Response> {
             if (!staged || staged.messageID !== body.message_id) {
               return errorJson('回退未生效：目标消息不存在或会话状态异常，请刷新后重试', 1, 400);
             }
-            // 文件已恢复、对话待物理清理：重置规划/审查/摘要并记录回退点，锁定一键发布
+            // 文件已恢复、对话待物理清理：重置规划/校验摘要并记录回退点，锁定一键发布
             updateDraft(draftId, {
               status: 'draft',
               phase: null,
               validation: null,
               validation_revision: null,
-              review: null,
-              review_revision: null,
               plan_summary: null,
               revert_message_id: body.message_id,
               error: undefined,
@@ -426,16 +462,13 @@ async function handleRequest(req: Request): Promise<Response> {
         }
         case 'check': {
           if (req.method === 'POST') {
-            // 手动重新校验：通过且审查已通过 → ready；失败 → draft + 错误（与审查后自动校验一致）。
+            // 手动重新校验：通过 → ready；失败 → draft + 错误（与编码后自动校验一致）。
             // 这是校验失败/测试环境恢复后的重跑入口，避免草稿卡死在 draft。
             const run = await runValidation(draftId);
             broadcast({ type: 'validation.updated', draft_id: draftId, run });
             if (run.status === 'passed') {
-              const after = readDraft(draftId);
-              if (after.review?.status === 'passed') {
-                updateDraft(draftId, { status: 'ready' });
-                broadcast({ type: 'draft.updated', draft_id: draftId, status: 'ready' });
-              }
+              updateDraft(draftId, { status: 'ready' });
+              broadcast({ type: 'draft.updated', draft_id: draftId, status: 'ready' });
             } else {
               const failedSteps = run.steps.filter((step) => step.status === 'failed');
               const envStep = failedSteps.find((step) => step.id === 'env');
@@ -451,64 +484,51 @@ async function handleRequest(req: Request): Promise<Response> {
           }
           break;
         }
-        case 'validate': {
-          if (req.method === 'POST') {
-            // 三阶段流程不再有独立校验：此端点改为触发「审查」（兼容旧前端调用）
-            const review = await startReview(draftId);
-            return json(review);
-          }
-          break;
-        }
-        case 'review': {
-          if (req.method === 'POST') {
-            assertFeatureEnabled('review');
-            const review = await startReview(draftId);
-            return json(review);
-          }
-          if (req.method === 'GET') {
-            return json(draft.review ?? null);
-          }
-          break;
-        }
         case 'debug': {
           if (req.method === 'POST') {
-            // 审查后的自动修复：
-            // - 有 must_fix → 自动修复（审查未通过）
-            // - 无 must_fix 但用户请求（include_suggestions）→ 附带 suggestion 一起修
-            // - fix_validation → 机械校验失败：把失败步骤作为问题单交给 AI 修复（提供修复条件）
+            // 让 AI 修复机械校验失败项：把失败步骤作为问题单发送到编码会话，
+            // AI 修复后由事件层自动重跑校验（对应 AGENT.md 3.5「AI 修复校验问题」）。
             const body = (await req.json().catch(() => ({}))) as {
-              include_suggestions?: boolean;
               fix_validation?: boolean;
             };
+            if (!body.fix_validation) {
+              return errorJson('没有需要修复的问题', 1, 400);
+            }
             const current = readDraft(draftId);
-            const reviewMustFix = current.review?.issues?.filter((i) => i.severity === 'must_fix');
-            const reviewSuggestions = current.review?.issues?.filter(
-              (i) => i.severity === 'suggestion',
-            );
-            if (reviewMustFix?.length) {
-              const review = await startDebugging(draftId);
-              return json(review);
+            if (current.validation?.status !== 'failed') {
+              return errorJson('没有失败的机械校验记录，无需修复', 1, 400);
             }
-            if (body.include_suggestions && reviewSuggestions?.length) {
-              const review = await startDebugging(draftId, null, { include_suggestions: true });
-              return json(review);
+            const issues = validationFixIssues(current.validation);
+            if (issues.length === 0) {
+              return errorJson(
+                '校验失败来自测试环境（非代码问题，AI 无法修复），请先同步测试环境后再试',
+                1,
+                400,
+              );
             }
-            if (body.fix_validation) {
-              if (current.validation?.status !== 'failed') {
-                return errorJson('没有失败的机械校验记录，无需修复', 1, 400);
-              }
-              const issues = validationFixIssues(current.validation);
-              if (issues.length === 0) {
-                return errorJson(
-                  '校验失败来自测试环境（非代码问题，AI 无法修复），请先同步测试环境后再试',
-                  1,
-                  400,
-                );
-              }
-              const review = await startDebugging(draftId, issues, { fix_validation: true });
-              return json(review);
-            }
-            return errorJson('没有需要修复的问题', 1, 400);
+            const client = opencode.getClient();
+            const sessionId = current.session_id ?? (await ensureSession(current, client, workspace));
+            const problemSheet = issues
+              .map((issue, i) => `### 问题 ${i + 1}：${issue.title}\n${issue.detail}`)
+              .join('\n\n');
+            const prompt =
+              `机械校验有 ${issues.length} 个失败项，请修复草稿中的对应问题。\n\n` +
+              problemSheet +
+              '\n\n修复完成后，用测试工具（unibot_deploy + unibot_run_tests）在测试环境验证，' +
+              '并等待系统自动重新校验。';
+            updateDraft(draftId, { status: 'coding', phase: 'coding' });
+            await client.session.promptAsync({
+              path: { id: sessionId },
+              body: { parts: [{ type: 'text', text: prompt }] },
+              query: { directory: workspace },
+            });
+            broadcast({ type: 'draft.updated', draft_id: draftId, status: 'coding' });
+            logger.info('draft', '让 AI 修复机械校验问题', {
+              draft_id: draftId,
+              extension_id: draft.extension_id,
+              issues: issues.length,
+            });
+            return json({ ok: true, issues: issues.length });
           }
           break;
         }
@@ -561,7 +581,7 @@ async function handleRequest(req: Request): Promise<Response> {
     try {
       const pending = await opencode.listPendingPermissions(draftWorkspace(draftId));
       const mine = pending.filter(
-        (p) => p.sessionID === draft.session_id || p.sessionID === draft.review_session_id,
+        (p) => p.sessionID === draft.session_id,
       );
       return json(mine.map((p) => toPermissionRequest(p)));
     } catch (e) {
@@ -580,9 +600,9 @@ async function handleRequest(req: Request): Promise<Response> {
       return errorJson('response 必须是 once / always / reject');
     }
     try {
-      // 权限请求可能来自主会话、审核会话或调试会话：必须回复到发起请求的会话，
-      // 否则审核/调试会话会一直阻塞等待授权，草稿永远停在 reviewing。
-      // 从 opencode 待处理权限列表中按 id 定位发起会话（列表为空/权限已消失时退回主会话）。
+      // 权限请求可能来自主会话（编码/修复）或测试工具触发的会话：必须回复到发起请求的会话，
+      // 否则该会话会一直阻塞等待授权。从 opencode 待处理权限列表中按 id 定位发起会话
+      //（列表为空/权限已消失时退回主会话）。
       const pending = await opencode.listPendingPermissions(draftWorkspace(draftId!));
       const { sessionId, tool } = resolvePermissionTarget(pending, permissionId!, draft.session_id!);
       const decision = response === 'always' && tool === 'bash' ? 'once' : response;
@@ -809,7 +829,7 @@ for (const draft of listDrafts()) {
   // 旧版草稿没有 phase 字段：按当前 status 回填（保证中止后继续的自动流转对旧草稿同样生效）
   if (
     !draft.phase &&
-    (draft.status === 'planning' || draft.status === 'coding' || draft.status === 'debugging')
+    (draft.status === 'planning' || draft.status === 'coding')
   ) {
     updateDraft(draft.id, { phase: draft.status });
   }
@@ -845,9 +865,6 @@ for (const draft of listDrafts()) {
       draft_id: draft.id,
       session_id: draft.session_id,
     });
-  }
-  if (draft.review_session_id) {
-    trackSession(draft.id, draft.review_session_id);
   }
 }
 

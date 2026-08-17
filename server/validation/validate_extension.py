@@ -253,6 +253,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='UniBot 扩展校验（Studio 专用）')
     parser.add_argument('ext_dir', type=Path, help='待校验的扩展目录（必须位于 UniBot 根目录之外）')
     parser.add_argument('--unibot-root', type=Path, required=True, help='UniBot 根目录')
+    parser.add_argument(
+        '--allow-in-root', action='store_true',
+        help='允许校验位于 UniBot 根目录内的扩展（仅测试工具对已部署副本使用，见 test_tools.ts）',
+    )
+    parser.add_argument(
+        '--steps', type=str, default='',
+        help='只运行指定步骤（逗号分隔，如 loader / tests；为空则全部运行）',
+    )
     args = parser.parse_args()
 
     ext_dir = args.ext_dir.resolve()
@@ -261,13 +269,15 @@ def main() -> int:
     if not ext_dir.is_dir():
         print(json.dumps({'ok': False, 'steps': [], 'error': f'目录不存在：{ext_dir}'}, ensure_ascii=False))
         return 2
-    # 路径安全：目标必须位于 UniBot 根目录之外（草稿目录）
-    try:
-        ext_dir.relative_to(unibot_root)
-        print(json.dumps({'ok': False, 'steps': [], 'error': '不允许校验 UniBot 目录内的扩展'}, ensure_ascii=False))
-        return 2
-    except ValueError:
-        pass
+    # 路径安全：目标必须位于 UniBot 根目录之外（草稿目录）；测试工具对已部署副本
+    # 显式传 --allow-in-root 放行（副本位于测试环境 Extensions/ 内，路径由后端校验）
+    if not args.allow_in_root:
+        try:
+            ext_dir.relative_to(unibot_root)
+            print(json.dumps({'ok': False, 'steps': [], 'error': '不允许校验 UniBot 目录内的扩展'}, ensure_ascii=False))
+            return 2
+        except ValueError:
+            pass
     # 切换到 UniBot 根目录：Scripts.Config 等模块按相对路径（Config.toml）解析配置，
     # 不依赖调用方 cwd（草稿工作区）
     os.chdir(unibot_root)
@@ -281,12 +291,20 @@ def main() -> int:
     except Exception:  # noqa: BLE001 - 无 NoneBot 时仅跳过框架侧步骤
         pass
 
-    _check_manifest(ext_dir)
-    _check_syntax(ext_dir)
-    _check_ruff(ext_dir, unibot_root)
-    _check_tests(ext_dir, unibot_root)
-    _check_loader(ext_dir, unibot_root)
-    _check_dependencies(ext_dir)
+    # 步骤过滤器（--steps loader / tests 等，测试工具按需只跑单步）
+    only_steps: set[str] = {s.strip() for s in args.steps.split(',') if s.strip()}
+
+    def run_step(step_id: str, fn) -> None:
+        if only_steps and step_id not in only_steps:
+            return
+        fn()
+
+    run_step('manifest', lambda: _check_manifest(ext_dir))
+    run_step('syntax', lambda: _check_syntax(ext_dir))
+    run_step('ruff', lambda: _check_ruff(ext_dir, unibot_root))
+    run_step('tests', lambda: _check_tests(ext_dir, unibot_root))
+    run_step('loader', lambda: _check_loader(ext_dir, unibot_root))
+    run_step('dependencies', lambda: _check_dependencies(ext_dir))
 
     ok = all(step['ok'] for step in STEPS)
     result = {'ok': ok, 'steps': STEPS, 'extension_id': ext_dir.name}

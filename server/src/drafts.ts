@@ -226,11 +226,8 @@ export function createDraft(input: {
     status: 'draft',
     phase: 'planning',
     session_id: null,
-    review_session_id: null,
     model: input.model,
     agent: input.agent,
-    review: null,
-    review_revision: null,
     validation: null,
     validation_revision: null,
     created_at: new Date().toISOString(),
@@ -352,13 +349,8 @@ export function sanitizeTypes(types: string[]): ExtensionType[] {
 /** 草稿是否允许发送新 prompt */
 export function assertPromptable(draft: DraftMeta) {
   if (draft.status === 'published') throw new DraftError('已发布草稿为只读', 'PUBLISHED');
-  // 规划/编码/审查/修复期间禁止追加消息（前端按钮也应切换为停止）
-  if (
-    draft.status === 'planning' ||
-    draft.status === 'coding' ||
-    draft.status === 'reviewing' ||
-    draft.status === 'debugging'
-  ) {
+  // 规划/编码期间禁止追加消息（前端按钮也应切换为停止）
+  if (draft.status === 'planning' || draft.status === 'coding') {
     throw new DraftError('后台任务进行中，请稍候', 'BUSY');
   }
 }

@@ -54,6 +54,10 @@ function loadConfig(): StudioConfig {
       // 与 server/package.json 的 @opencode-ai/sdk 版本一致；桌面客户端随包内置该版本二进制
       version: '1.18.18',
       data_dir: join(dataDir, 'opencode'),
+      // LLM 请求超时（毫秒）：注入 opencode provider options.timeout / chunkTimeout。
+      // 思考模型长时间无输出时默认 chunkTimeout（30s）会提前掐断，这里统一调大。
+      timeout_ms: 900_000,       // 整次请求超时（opencode 默认 300s）
+      chunk_timeout_ms: 300_000, // 流式块间隔超时（opencode 默认 30s）
     },
     unibot_env: {
       repo_owner: process.env.UNIBOT_REPO_OWNER ?? 'MineJPGcraft',
@@ -63,14 +67,13 @@ function loadConfig(): StudioConfig {
       test_dir: join(dataDir, 'unibot'),
     },
     features: {
-      review: true,
+      test_tools: true,
       mc_test_environment: false,
       market_publish: false,
       git_integration: false,
     },
     defaults: {
       agent: 'build',
-      max_review_rounds: 3,
     },
     auth: { password: '', token_secret: '' },
   };

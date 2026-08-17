@@ -1,10 +1,10 @@
 <script setup>
-// 功能结果摘要（Plan 3.4 右栏「功能」Tab）：扩展信息 + AI 审核 + 发布入口
+// 功能结果摘要（Plan 3.4 右栏「功能」Tab）：扩展信息 + 机械校验状态 + 发布入口
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { TYPE_LABELS } from '@/utils/draft_status'
-import AiReviewPanel from './AiReviewPanel.vue'
 import Button from '@/components/ui/Button.vue'
+import Badge from '@/components/ui/Badge.vue'
 
 const props = defineProps({
   draft: { type: Object, required: true },
@@ -17,9 +17,9 @@ const emit = defineEmits(['publish'])
 const canPublishHint = computed(() => {
   const status = props.draft.status
   if (status === 'published') return '已发布，草稿为只读'
-  // 审查通过但机械校验失败退回 draft：提示真实原因（顶部错误横幅有详情）
+  // 编码完成但机械校验失败退回 draft：提示真实原因（顶部错误横幅有详情）
   if (props.draft.error) return '机械校验未通过，暂时无法发布（见顶部错误提示）'
-  if (status !== 'ready') return '审查通过后即可发布'
+  if (status !== 'ready') return '编码完成且机械校验通过后即可发布'
   return ''
 })
 </script>
@@ -40,7 +40,21 @@ const canPublishHint = computed(() => {
       </dl>
     </div>
 
-    <AiReviewPanel :review="draft.review" />
+    <!-- 空气状态：编码中 / 校验中（由后端自动触发机械校验） -->
+    <div v-if="['planning', 'coding'].includes(draft.status)" class="result-section status-box working">
+      <Icon icon="lucide:loader-2" width="16" class="spin" />
+      <span>{{ draft.status === 'coding' ? '编码与机械校验进行中…' : 'AI 正在规划实现方案…' }}</span>
+    </div>
+    <div v-else-if="draft.validation" class="result-section status-box" :class="draft.validation.status">
+      <Icon
+        :icon="draft.validation.status === 'passed' ? 'lucide:check-circle-2' : draft.validation.status === 'failed' ? 'lucide:alert-triangle' : 'lucide:loader-2'"
+        width="16"
+        :class="{ spin: draft.validation.status === 'running' }"
+      />
+      <span>
+        {{ draft.validation.status === 'passed' ? '机械校验通过，可以发布' : draft.validation.status === 'failed' ? '机械校验未通过' : '机械校验进行中…' }}
+      </span>
+    </div>
 
     <div class="result-section">
       <h4>发布</h4>
@@ -95,6 +109,51 @@ const canPublishHint = computed(() => {
   margin: 0;
   word-break: break-word;
   line-height: 1.5;
+}
+
+.status-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  border: 1px solid;
+  font-weight: 500;
+}
+
+.status-box.passed {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.status-box.failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
+.status-box.working {
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border-color: var(--border);
+}
+
+.status-box.running {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: #bfdbfe;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .publish-btn {

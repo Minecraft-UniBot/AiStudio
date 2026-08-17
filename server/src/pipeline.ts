@@ -1,5 +1,6 @@
 /**
- * 阶段编排：规划（planning）→ 编码（coding）→ 审查（reviewing）的三阶段流水线。
+ * 阶段编排：规划（planning）→ 编码（coding）的两阶段流水线。
+ * 编码完成后由事件层自动触发机械校验（不再有独立审查）。
  * 独立模块避免 index.ts <-> events.ts 循环依赖。
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -33,6 +34,8 @@ export function buildSecurity(workspace: string): string {
       `   - 环境根目录：${config.unibot_env.test_dir}\n` +
       `   - 校验命令：${unibotEnvPython()} ${validationScriptPath()} <扩展目录> --unibot-root ${config.unibot_env.test_dir}\n` +
       '   - 扩展目录为草稿工作区内的扩展目录（如 <workspace>/<ExtensionId>）；运行前先确认测试环境已就绪。',
+    `9. 测试工具（unibot_*，OpenCode 插件注册）：可把草稿扩展部署到测试环境并加载/运行测试验证，\n` +
+      `   只允许操作测试环境（${config.unibot_env.test_dir}），禁止触碰正式扩展目录；部署前先调 unibot_test_status 确认环境就绪。`,
   ].join('\n');
 }
 

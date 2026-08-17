@@ -14,8 +14,6 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { opencode } from './opencode';
 import { readDraft, updateDraft, draftWorkspace, listDrafts } from './drafts';
-import { settleDebugging } from './debugging';
-import { settleReview, startReview } from './review';
 import { runValidation } from './validation';
 import { startCoding } from './pipeline';
 import { draftIdForSession, getWorkspaces } from './sessions';
@@ -318,148 +316,66 @@ function normalize(raw: Record<string, unknown>): StudioEvent | null {
 let consumerStarted = false;
 
 /**
- * 会话完成/错误后的状态流转：
- * - 主会话（生成/修复/调试）idle → generating/repairing/debugging -> draft
- * - 审核会话 idle → 结算审核结果（settleReview），通过则 ready
- * - session.error → 草稿置为 error
- */
-/**
- * 修复/调试会话完成后：结算进展 → 有进展则重新校验 → 校验通过后自动复核。
- * 无进展熔断由 settleDebugging 处理（连续两轮 → failed）。
- */
-/**
- * 修复（审查发现问题后）完成后：结算进展 → 有进展则重新审查。
- * 无进展熔断由 settleDebugging 处理（连续两轮 → failed）。
- */
-async function settleAndRecheck(draftId: string) {
-  try {
-    const outcome = await settleDebugging(draftId);
-    const afterSettle = readDraft(draftId);
-    if (afterSettle.status === 'failed') {
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'failed' });
-      return;
-    }
-    if (!outcome.changed) {
-      // 修复无进展但未熔断：回到 draft 等待用户决定（前端展示原因）
-      updateDraft(draftId, { status: 'draft', phase: null });
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
-      return;
-    }
-    // 有进展 → 重新审查
-    await startReview(draftId);
-    broadcast({ type: 'draft.updated', draft_id: draftId, status: 'reviewing' });
-  } catch (e) {
-    logger.error('events', '修复结算失败', { draft_id: draftId, error: (e as Error).message });
-    const current = readDraft(draftId);
-    if (current.status === 'debugging') {
-      updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
-    }
-  }
-}
-
-/**
  * 闲置信号去重：opencode 在会话空闲时成对下发 session.status{type:'idle'} 与 session.idle
  * （见 opencode packages/opencode/src/session/status.ts 的 set()），SDK 的 onSseEvent
  * 不等待回调，两个事件会并发进入 settleSessionState，导致阶段流转执行两次
- * （编码提示词发双份、审查会话开两个）。按 draftId:sessionId 在短窗口内只处理一次。
+ * （编码提示词发双份）。按 draftId:sessionId 在短窗口内只处理一次。
  * busy 事件到达（新一轮运行开始）时清除标记。
  */
 const LAST_IDLE = new Map<string, number>();
 const IDLE_DEDUP_MS = 2000;
 
 /**
- * 审查结算（导出供测试）：结算审核会话结果并推进草稿状态。
- * - SSE 路径与协调循环 reconcile 都走这里，短窗口内只结算一次（冷却去重）
- * - 结算失败（opencode 瞬时错误 / 会话异常 / 无输出）不再把草稿留在 reviewing：
- *   置回 draft 并附错误信息，用户可一键「重新审查」，避免永久卡在审查中
+ * 编码完成后自动执行机械校验（AGENT.md 3.5：不再有独立审核 AI，校验流水线把关）：
+ * - 校验通过 → ready（可一键发布）
+ * - 校验失败 → 回到 draft + 错误说明（前端提供「让 AI 修复校验问题」入口）
+ * 校验失败不是死胡同：AI 读取失败步骤修复后，用户可点「重新校验」重跑。
  */
-const REVIEW_SETTLED_AT = new Map<string, number>();
-const REVIEW_SETTLE_COOLDOWN_MS = 8000;
-/** draftId -> 已成功结算的审核会话 id：must_fix 等待修复时会话仍 idle，
- *  reconcile 靠它区分「已结算等待处理」与「idle 事件丢失未结算」，避免循环重结算 */
-const REVIEW_SETTLED_SESSION = new Map<string, string>();
-
-export async function settleReviewAndAdvance(draftId: string): Promise<void> {
-  const now = Date.now();
-  const last = REVIEW_SETTLED_AT.get(draftId) ?? 0;
-  if (now - last < REVIEW_SETTLE_COOLDOWN_MS) return;
-  REVIEW_SETTLED_AT.set(draftId, now);
+async function settleCodingAndValidate(draftId: string): Promise<void> {
   try {
-    const result = await settleReview(draftId);
-    const after = readDraft(draftId);
-    REVIEW_SETTLED_SESSION.set(draftId, after.review_session_id ?? '');
-    logger.info('review', `审查完成`, {
-      draft_id: draftId,
-      extension_id: after.extension_id,
-      status: result.status,
-      issues: result.issues.length,
-      must_fix: result.issues.filter((i) => i.severity === 'must_fix').length,
-    });
-    broadcast({ type: 'review.updated', draft_id: draftId, review: result });
-    if (result.status === 'passed') {
-      // 审查通过后自动执行机械校验（在共享 UniBot 测试环境中，见 validation.ts），
-      // 校验通过才允许发布；失败则回到 draft 等待修复。
-      try {
-        const run = await runValidation(draftId);
-        broadcast({ type: 'validation.updated', draft_id: draftId, run });
-        if (run.status === 'passed') {
-          updateDraft(draftId, { status: 'ready' });
-        } else {
-          const failedSteps = run.steps.filter((step) => step.status === 'failed');
-          const envStep = failedSteps.find((step) => step.id === 'env');
-          const failedNames = failedSteps.map((step) => step.name).join('、');
-          updateDraft(draftId, {
-            status: 'draft',
-            error:
-              envStep?.message ?? `机械校验未通过：${failedNames}（详见检查结果）`,
-          });
-        }
-      } catch (validationError) {
-        logger.error('validation', '审查后机械校验执行失败', {
-          draft_id: draftId,
-          error: (validationError as Error).message,
-        });
-        updateDraft(draftId, {
-          status: 'draft',
-          error: `机械校验失败：${(validationError as Error).message}`,
-        });
-      }
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: readDraft(draftId).status });
+    const run = await runValidation(draftId);
+    broadcast({ type: 'validation.updated', draft_id: draftId, run });
+    if (run.status === 'passed') {
+      updateDraft(draftId, { status: 'ready' });
+      logger.info('draft', '编码完成，机械校验通过，草稿进入 ready', {
+        draft_id: draftId,
+        extension_id: readDraft(draftId).extension_id,
+      });
     } else {
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: after.status });
+      const failedSteps = run.steps.filter((step) => step.status === 'failed');
+      const envStep = failedSteps.find((step) => step.id === 'env');
+      const failedNames = failedSteps.map((step) => step.name).join('、');
+      updateDraft(draftId, {
+        status: 'draft',
+        error: envStep?.message ?? `机械校验未通过：${failedNames}（详见检查结果）`,
+      });
+      logger.warn('draft', '编码完成，机械校验未通过，回到 draft', {
+        draft_id: draftId,
+        failed: failedNames,
+      });
     }
+    broadcast({ type: 'draft.updated', draft_id: draftId, status: readDraft(draftId).status });
   } catch (e) {
-    logger.error('review', '审查结算失败，草稿回到 draft（可重试审查）', {
+    logger.error('validation', '编码后机械校验执行失败', {
       draft_id: draftId,
       error: (e as Error).message,
     });
-    let current;
-    try {
-      current = readDraft(draftId);
-    } catch {
-      return; // 草稿已删除
-    }
-    if (current.status === 'reviewing') {
-      updateDraft(draftId, {
-        status: 'draft',
-        phase: null,
-        error: `审查结算失败：${(e as Error).message}（可点击「重新审查」重试）`,
-      });
-      broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
-    }
+    updateDraft(draftId, {
+      status: 'draft',
+      error: `机械校验失败：${(e as Error).message}`,
+    });
+    broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
   }
 }
 
 /**
  * 阶段状态调和（协调循环兜底）：
- * 草稿停留在阶段状态（planning / coding / debugging / reviewing）但对应 opencode
- * 会话实际已空闲时，按会话状态主动结算推进流水线，避免「一直显示运行中」。
+ * 草稿停留在阶段状态（planning / coding）但对应 opencode 会话实际已空闲时，
+ * 按会话状态主动结算推进流水线，避免「一直显示运行中」。
  * 覆盖两类场景：
- * - SSE idle 事件丢失 / 订阅断开的间隙（原 reconcileReviewing）
+ * - SSE idle 事件丢失 / 订阅断开的间隙
  * - 后端重启后：opencode 会话已空闲不会重发 idle 事件，草稿会永久停在阶段状态，
- *   只能靠这里按 /session/status 兜底结算（planning→coding、coding→review、
- *   debugging→结算重查、reviewing→结算审查）。
+ *   只能靠这里按 /session/status 兜底结算（planning→coding、coding→机械校验）。
  */
 async function reconcileStuckDrafts(): Promise<void> {
   let drafts;
@@ -469,11 +385,9 @@ async function reconcileStuckDrafts(): Promise<void> {
     return;
   }
   for (const draft of drafts) {
-    if (!['planning', 'coding', 'debugging', 'reviewing'].includes(draft.status)) continue;
-    const sessionId = draft.status === 'reviewing' ? draft.review_session_id : draft.session_id;
+    if (!['planning', 'coding'].includes(draft.status)) continue;
+    const sessionId = draft.session_id;
     if (!sessionId) continue;
-    // 该审核会话已成功结算过（如 must_fix 等待用户点「自动修复」）→ 跳过，避免循环重结算
-    if (draft.status === 'reviewing' && REVIEW_SETTLED_SESSION.get(draft.id) === sessionId) continue;
     try {
       const client = opencode.getClient();
       const res = await client.session.status({
@@ -538,7 +452,7 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
     return; // 草稿已删除
   }
 
-  // 主会话完成（规划 / 编码 / 修复）
+  // 主会话完成（规划 / 编码）
   if (sessionId === draft.session_id) {
     // 规划完成 → 自动进入编码阶段
     if (draft.status === 'planning') {
@@ -557,37 +471,17 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
       }
       return;
     }
-    // 编码完成 → 自动进入审查
+    // 编码完成 → 自动机械校验（AI 已在编码阶段用测试工具自测；校验通过才 ready）
     if (draft.status === 'coding') {
-      logger.info('draft', '编码完成，自动进入审查阶段', {
+      logger.info('draft', '编码完成，自动机械校验', {
         draft_id: draftId,
         extension_id: draft.extension_id,
         session_id: sessionId,
       });
-      try {
-        await startReview(draftId);
-        broadcast({ type: 'draft.updated', draft_id: draftId, status: 'reviewing' });
-      } catch (e) {
-        logger.error('draft', '进入审查阶段失败', { draft_id: draftId, error: (e as Error).message });
-        updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
-        broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
-      }
+      await settleCodingAndValidate(draftId);
       return;
     }
-    if (draft.status === 'debugging') {
-      logger.info('draft', '修复完成，进入结算', {
-        draft_id: draftId,
-        extension_id: draft.extension_id,
-        session_id: sessionId,
-      });
-      await settleAndRecheck(draftId);
-    }
     return;
-  }
-
-  // 审查会话完成 → 结算审查结果
-  if (sessionId === draft.review_session_id) {
-    await settleReviewAndAdvance(draftId);
   }
 }
 

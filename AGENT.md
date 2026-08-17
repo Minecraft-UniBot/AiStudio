@@ -1,13 +1,13 @@
 # UniBot Extension Studio 规划
 
-> 状态：第一版核心闭环已实施（创建 → 生成 → 校验 → 审核 → 一键发布），见 `Studio/` 目录  
+> 状态：第一版核心闭环已实施（创建 → 生成 → 校验 → 一键发布），见 `Studio/` 目录  
 > 日期：2026-08-13（实施：2026-08-14）  
 > 基础能力：[OpenCode](https://github.com/anomalyco/opencode) Server API  
 > 前端编码规范：合并自 `Studio/Frontend.md`，见「九·五、前端编码规范」
 
 ## 一、定位
 
-**Extension Studio** 是一个独立于 UniBot WebUI 的 AI 扩展开发平台，本质是 OpenCode Server 的特定化封装：把通用 AI 编程能力定制为「开发 UniBot 原生扩展」这一垂直场景，让不会写代码的用户用自然语言创建、检查、审核并发布扩展。
+**Extension Studio** 是一个独立于 UniBot WebUI 的 AI 扩展开发平台，本质是 OpenCode Server 的特定化封装：把通用 AI 编程能力定制为「开发 UniBot 原生扩展」这一垂直场景，让不会写代码的用户用自然语言创建、检查并发布扩展。
 
 平台独立部署、独立前后端，不嵌入 WebUi；通过约定的发布接口把扩展交付给 UniBot。目标用户仍然是不需要理解代码与 Diff 的普通用户。
 
@@ -35,7 +35,7 @@
 
 1. **草稿与运行目录隔离**：AI 只能操作平台数据目录下的草稿工作区，不能直接写 UniBot `Extensions/`；发布是唯一交付通道。
 2. **后端是唯一可信边界**：浏览器不直连 OpenCode，不接触其密码，也不能提交任意工作目录。
-3. **结果导向**：用户只需要理解功能摘要、使用方式和检查结果；代码审查、路径检查、依赖检查和测试由后台自动完成。
+3. **结果导向**：用户只需要理解功能摘要、使用方式和检查结果；路径检查、依赖检查和测试由后台自动完成。
 4. **权限默认拒绝**：OpenCode 的文件写入仅允许草稿目录；shell、网络访问和目录外路径必须拒绝或人工确认。
 5. **可恢复**：草稿元数据、OpenCode 会话 ID、校验结果与发布记录落盘，页面刷新不丢失进度。
 6. **契约优先**：系统提示词引用 UniBot 扩展开发规范和示例，并以与 UniBot 兼容的校验流水线为最终标准。
@@ -145,40 +145,47 @@ flowchart LR
 - 检查失败：显示“自动修复”，修复后重新检查
 - 检查通过：显示“一键发布”
 
-机械校验失败不是死胡同：审查通过后自动校验失败会退回草稿并展示失败步骤，前端提供「让 AI 修复校验问题」（把失败步骤作为问题单喂给 AI，修完重跑校验）、「重新校验」（测试环境恢复/手动修复后的重跑入口）和「同步测试环境」（环境未就绪类失败——AI 无法修复基础设施问题）；校验通过且审查已通过时草稿进入 `ready`。
+机械校验失败不是死胡同：自动校验失败会退回草稿并展示失败步骤，前端提供「让 AI 修复校验问题」（把失败步骤作为问题单喂给 AI，修完重跑校验）、「重新校验」（测试环境恢复/手动修复后的重跑入口）和「同步测试环境」（环境未就绪类失败——AI 无法修复基础设施问题）；校验通过时草稿进入 `ready`。
 
 发布确认只列出功能摘要、使用方式、配置项和重启提示。技术细节可折叠查看。目标 ID 已存在时第一版拒绝覆盖；后续版本再设计已有扩展的备份与升级流程。
 
 发布采用同一文件系统内的临时目录和原子重命名：重新校验路径与清单，将草稿复制到 UniBot `Extensions/.staging-<id>`，校验完整后重命名为 `Extensions/<id>`。失败时清理 staging，不改变正式目录。本地发布要求平台与 UniBot 同机；远程部署时改为调用 UniBot REST API 完成交付。发布成功后将草稿设为只读并提示重启生效。
 
-### 3.5 AI 审核与调试
+### 3.5 AI 测试工具（OpenCode 插件）
 
-代码生成完成后，系统自动启动独立的“审核 AI”，避免由同一个会话同时负责实现和自我评价。审核 AI 只读访问草稿、原始需求、对话中的用户确认项、检查结果和测试输出，不拥有启用权限。
+不再设置独立的「审核 AI」。生成会话内的 AI 直接使用平台通过 OpenCode 插件注册的测试工具，在真实 UniBot 测试环境中对扩展做「部署 → 加载 → 验证 → 观察日志」的闭环，发现异常当场修复、重新加载验证，最后仍由机械校验流水线把关。
 
-审核内容包括：
+测试工具由 **OpenCode 插件**提供：插件源码放在 `server/plugins/`，随 Studio 打包部署，并在 OpenCode 启动时通过配置注册（见 5.1 的独立数据目录与 5.2 的路径路由）。每个工具即 `@opencode-ai/plugin` 的 `tool()` 定义，供生成会话的 AI 调用。
 
-- 需求一致性：逐项核对用户描述的功能、命令、配置项和异常行为是否已经实现
-- 扩展规范：检查清单、目录、生命周期、公共 API 使用方式和依赖声明
-- 可靠性：查找未处理异常、空值、重复注册、资源未释放和并发状态问题
-- 安全性：检查越权文件访问、命令执行、网络访问、敏感信息读取和不必要依赖
-- 可用性：确认配置名称、提示消息和使用方式对普通用户清晰可懂
-- 测试覆盖：根据需求生成或补充场景测试，并执行启用前校验流水线
+第一版工具清单：
 
-发现问题后进入自动调试循环：审核 AI 输出结构化问题单，调试 AI 根据问题单修改草稿，系统重新运行相关测试，再交回审核 AI 复核。默认最多执行 3 轮，且每轮必须让失败项减少或产生新的可验证信息；连续两轮没有进展时停止自动修改，向用户展示通俗的失败原因和可选处理方式。
+| 工具 | 作用 | 主要参数 |
+| --- | --- | --- |
+| `unibot_test_status` | 查询测试环境（UniBot 源码 + venv）是否就绪、版本、路径 | — |
+| `unibot_test_sync` | 拉取/更新测试环境到指定版本（幂等，原子替换） | `tag?` |
+| `unibot_deploy` | 把草稿扩展复制到测试环境的 `Extensions/<id>/`（staging + 原子重命名） | `extension_id` |
+| `unibot_undeploy` | 从测试环境移除已部署的扩展 | `extension_id` |
+| `unibot_load` | 触发测试环境 UniBot 重新加载扩展并报告绑定结果 | `extension_id` |
+| `unibot_logs` | 读取测试环境 UniBot 日志中与该扩展相关的最近记录 | `extension_id`、`lines?` |
+| `unibot_run_tests` | 在测试环境运行草稿自带的 pytest 测试并返回结构化结果 | `extension_id`、`paths?` |
+| `unibot_validate` | 运行与发布前一致的完整校验流水线（只读） | `extension_id` |
 
-普通用户只看到“正在审核功能”“正在修复问题”“审核通过”或“需要你确认”四类状态，以及最终的功能摘要。问题级别分为“必须修复”“建议优化”和“已通过”；源码位置、堆栈、测试输出和审核依据只在“技术详情”中展示。
+安全与边界：
 
-审核通过只代表草稿满足当前需求和自动化检查，不允许审核 AI 或调试 AI 自动触发发布。用户确认结果后，后端仍须核对未过期的文件摘要和全部强制检查结果。
+- 所有工具只允许操作**测试环境**（`unibot_env.test_dir`，独立于正式 UniBot），默认权限为 `ask`，由后端按 5.2 的路径校验规则约束
+- `unibot_deploy` 只写测试环境的 `Extensions/`，不触碰正式 `UniBot/Extensions/`；正式交付仍只走「一键发布」
+- 子进程执行复用 8.2 的受限子进程约束（固定 cwd、清理环境变量、超时与输出上限）
+- 测试环境被污染时可通过「同步测试环境」重建（见 3.4）
+
+AI 用工具自测并确认通过后，会话空闲时系统自动运行机械校验（与 `unibot_validate` 一致的流水线），校验通过草稿进入 `ready` 可一键发布；校验失败回到 `confirming`，由 AI 读取失败步骤修复后重新校验。
 
 ## 四、状态模型
 
 草稿状态：
 
 ```text
-主链：draft -> generating -> checking -> reviewing -> ready -> published
+主链：draft -> generating -> checking -> ready -> published
 分支：检查失败 -> repairing -> checking
-     审核发现问题 -> debugging -> checking -> reviewing（最多 3 轮，无进展熔断）
-     连续无进展 / 超出轮次 -> failed
 ```
 
 `draft.json` 建议字段：
@@ -192,15 +199,8 @@ flowchart LR
   "owner_id": "admin-user-id",
   "status": "checking",
   "session_id": "ses_xxx",
-  "review_session_id": "ses_review_xxx",
   "model": { "provider_id": "...", "model_id": "..." },
   "agent": "build",
-  "review": {
-    "round": 0,
-    "max_rounds": 3,
-    "result": null,
-    "issues": []
-  },
   "created_at": "ISO-8601",
   "updated_at": "ISO-8601",
   "validation_revision": null,
@@ -218,12 +218,12 @@ flowchart TB
     API --> DS[Draft Service]
     API --> OC[OpenCode Gateway]
     API --> VS[Validation Service]
-    API --> RV[Review & Debugging]
     API --> PB[Publisher]
     OC -->|HTTP + SSE| SERVER[opencode serve 127.0.0.1]
     SERVER --> WD[Studio Data / drafts/.../workspace]
+    SERVER --> PLUGIN[OpenCode 插件: 测试工具]
+    PLUGIN -->|回调 Studio API| API
     VS --> WD
-    RV --> WD
     PB -->|原子交付| EXT[UniBot/Extensions]
     PB -.->|可选远程| UAPI[UniBot REST API]
 ```
@@ -240,9 +240,9 @@ ExtensionStudio/
 │       ├── studio.ts           # 会话编排、权限策略、事件归一化、结果翻译
 │       ├── drafts.ts           # 草稿 CRUD、路径解析、文件摘要
 │       ├── validation.ts       # 校验流水线编排（子进程调用 UniBot 校验脚本）
-│       ├── review.ts           # AI 审核与调试编排
 │       ├── publishing.ts       # 发布器：本地目录 / UniBot API
 │       └── config.ts
+├── plugins/                    # OpenCode 插件：AI 测试工具（部署/加载/日志/测试）
 ├── web/                        # 前端：独立 Vue 3 + Vite 应用
 │   ├── package.json
 │   └── src/                    # 编码规范见九·五节，独立实现
@@ -263,6 +263,8 @@ ExtensionStudio/
 - 启动后轮询 `/global/health`，记录版本；退出时终止子进程
 - 进程异常退出后做有限次数退避重启，并把“服务不可用”推送到页面
 - 固定并记录经过验证的 OpenCode 版本；健康检查发现不兼容版本时禁用工坊
+- 启动前注入 LLM 超时配置（provider `options.timeout` / `options.chunkTimeout`），
+  思考模型长时间无输出时不被默认的 30s chunk 超时提前掐断（见 5.1.1）
 
 后端统一使用 JavaScript 生态：通过官方 `@opencode-ai/sdk`（TypeScript 类型安全客户端）连接 OpenCode，直接复用 SDK 的 Session / Message / Part / Permission / Event 类型与 SSE 事件流，不自己维护 HTTP 客户端。运行时默认 Bun（与 WebUi、FakePlayer 一致），SDK 以 npm 包形式安装。OpenCode API 演进时，以固定版本的 `/doc` OpenAPI 3.1 规范快照跑契约测试兜底。
 
@@ -315,9 +317,6 @@ Studio Server 维护一条到 OpenCode `/event` 的 SSE 连接，按 `sessionID`
 | `POST` | `/api/studio/drafts/{id}/permissions/{permission_id}` | 回复权限请求 |
 | `POST` | `/api/studio/drafts/{id}/questions/{question_id}` | 回复结构化问题 |
 | `POST` | `/api/studio/drafts/{id}/validate` | 启动校验流水线 |
-| `POST` | `/api/studio/drafts/{id}/review` | 启动独立 AI 审核 |
-| `GET` | `/api/studio/drafts/{id}/review` | 获取审核状态、问题摘要和轮次 |
-| `POST` | `/api/studio/drafts/{id}/debug` | 根据审核问题启动自动调试 |
 | `POST` | `/api/studio/drafts/{id}/publish` | 校验摘要并原子发布 |
 | `GET` | `/api/studio/settings` | 平台配置：功能开关、默认模型、Agent 配置 |
 | `PATCH` | `/api/studio/settings` | 更新平台配置（校验后写入配置文件） |
@@ -360,8 +359,6 @@ OpenCode API 在迭代中可能改名；实施时以固定版本的 `/doc` OpenA
 server/prompts/
 ├── system.md          # 基础角色与总原则
 ├── scaffold.md        # 生成阶段：扩展规范 + 需求 + 白名单
-├── review.md          # 审核阶段：审核范围与输出格式
-├── debugging.md       # 调试阶段：问题单消费与修复约束
 ├── summary.md         # 结果翻译：功能摘要与使用方式
 └── messages/          # 面向小白的文案（可编辑）
 ```
@@ -374,25 +371,25 @@ server/prompts/
 
 ### 7.2 工具注册表
 
-平台维护一张工具注册表，决定 AI 在生成/审核/调试阶段可使用的 OpenCode 工具：
+平台维护一张工具注册表，决定 AI 在生成阶段可使用的 OpenCode 工具（含插件注册的测试工具）：
 
 ```ts
 interface ToolEntry {
-  id: string            // 如 read、edit、bash、web_search
+  id: string            // 如 read、edit、bash、web_search、unibot_deploy
   enabled: boolean      // 是否可用
   default_permission: 'allow' | 'ask' | 'reject'
-  phases: Array<'generate' | 'review' | 'debug'>  // 允许使用的阶段
+  phases: Array<'generate'>  // 允许使用的阶段
   note?: string         // 说明
 }
 ```
 
 - 注册表配置存在 `config/tools.json`，管理员可在平台内开关工具、调整默认权限和适用阶段
-- 生成阶段默认开放草稿内读写；审核阶段只读（禁用 edit/bash）；调试阶段按需开放
-- 新增工具只需在注册表登记并实现适配器；删除/停用只需改配置，不改代码
+- 生成阶段默认开放草稿内读写；测试工具（部署、加载、运行测试）默认 `ask`，由管理员确认后放行
+- 新增工具只需在注册表登记并实现适配器（插件工具在 `plugins/` 实现）；删除/停用只需改配置，不改代码
 
 ### 7.3 Agent 与模型配置
 
-- 模型列表读取 OpenCode providers，管理员可在平台内为「生成 / 审核 / 调试」分别指定默认模型
+- 模型列表读取 OpenCode providers，管理员可在平台内为「生成」指定默认模型
 - Agent 配置（prompt、tools、permissions）以配置文件形式存放，可编辑后热生效或重启生效
 
 ### 7.4 功能开关与模块注册表
@@ -402,7 +399,7 @@ interface ToolEntry {
 ```text
 server/config/features.json
 {
-  "review": true,          // AI 审核与调试
+  "test_tools": true,          // OpenCode 插件测试工具（部署/加载/日志/测试）
   "mc_test_environment": false,  // MC 测试环境（备用方案）
   "market_publish": false, // 市场发布
   "git_integration": false // Git / PR 工作流
@@ -475,7 +472,6 @@ web/src/
 │   ├── PermissionRequest.vue
 │   ├── DraftFileTree.vue
 │   ├── ResultSummary.vue
-│   ├── AiReviewPanel.vue
 │   ├── ValidationPanel.vue
 │   └── PublishDialog.vue
 ├── components/ui/
@@ -719,8 +715,7 @@ server/src/
     ├── opencode.ts
     ├── events.ts
     ├── validation.ts
-    ├── review.ts
-    ├── debugging.ts
+    ├── test_tools.ts # 测试工具后端实现：插件回调（部署/加载/日志/测试）
     ├── publishing.ts
     ├── prompts.ts
     ├── config.ts      # 平台配置与功能开关（features.json 等）
@@ -734,8 +729,7 @@ server/src/
 - `opencode.ts`：OpenCode 进程生命周期、Basic Auth、SDK 调用和版本兼容检查
 - `events.ts`：SSE 消费、事件归一化和 WebSocket 广播
 - `validation.ts`：校验流水线编排与结构化结果（步骤可配置，子进程调用 UniBot 校验脚本）
-- `review.ts`：创建独立审核会话、需求核对、问题分级和审核结果持久化
-- `debugging.ts`：消费审核问题单、控制最多 3 轮修复并判断是否取得进展
+- `test_tools.ts`：OpenCode 插件测试工具的后端实现——草稿部署/移除到测试环境、加载与绑定诊断、日志读取、测试运行（受 5.2 路径校验与 8.2 子进程约束）
 - `publishing.ts`：校验通过后的原子发布（本地目录 / UniBot API）
 - `prompts.ts`：提示词模板管理：版本化、编辑、预览、启用与回滚
 - `config.ts`：平台配置读写与校验（功能开关、默认模型、Agent 配置）
@@ -754,10 +748,10 @@ server/src/
 - 草稿会话丢失：允许为现有草稿创建新会话，不删除文件
 - AI 执行失败：保留已产生结果，可继续对话或重新生成
 - 浏览器刷新：恢复草稿、消息、待办、diff 和待处理权限
-- 后端重启：正在执行的机械校验落盘为失败（`interrupted` 步骤，可一键重新校验）；停留在 planning/coding/debugging/reviewing 的草稿由协调循环按 opencode 会话实际状态自动结算，不会永久显示“运行中”
+- 后端重启：正在执行的机械校验落盘为失败（`interrupted` 步骤，可一键重新校验）；停留在 planning/coding 的草稿由协调循环按 opencode 会话实际状态自动结算，不会永久显示“运行中”
 - 自动检查超时：允许取消并重试，保留每一步结果
-- AI 审核不可用：保留已通过的机械检查结果，禁止一键发布并允许重试审核
-- 自动调试达到 3 轮或连续两轮无进展：停止修改，展示通俗原因和“补充需求 / 重新生成”选项
+- 测试环境不可用（未就绪 / 被污染 / 版本不兼容）：保留已通过的机械检查结果，禁止一键发布，并显示「同步测试环境」入口
+- 测试部署失败：保留测试环境原状并清理 staging，展示失败原因，可重试
 - 启用竞争：后端对扩展 ID 和草稿加锁；正式目录出现后立即拒绝
 - 磁盘空间不足：创建、检查和启用前检查并返回明确错误
 
@@ -771,10 +765,8 @@ server/src/
 - OpenCode API 契约 fixture：session、message parts、diff、permission、question、SSE
 - SSE 断线重连、重复事件去重和不同 session 隔离
 - permission 的 `once`、`always`、`reject` 映射及后端二次约束
-- 生成与审核使用不同 session，审核 session 只有只读权限且不能触发启用
-- 审核问题单的等级、依据、建议和验证状态 schema 校验
-- 自动调试最多 3 轮，连续两轮无进展时停止且不会继续修改文件
-- 每轮调试后文件摘要变化会使旧审核结果失效，并重新执行相关检查
+- 测试工具只允许操作测试环境目录：路径校验、staging 清理、并发锁
+- 测试部署后文件摘要变化会使旧检查结果失效，并重新执行相关检查
 - 检查摘要过期后一键发布按钮立即锁定
 - staging 失败不污染正式目录，成功启用具备原子性
 - 同一扩展 ID 并发创建和发布冲突
@@ -787,15 +779,14 @@ server/src/
 - 增量事件合并、断线后的 REST 恢复与重复事件处理
 - 生成中停止按钮及发送状态
 - 结果、设置和检查 Tabs 状态同步
-- AI 审核、自动调试、复核通过和需要用户确认四类状态正确展示
-- 普通模式只显示通俗问题摘要，技术详情可查看问题依据和测试输出
+- 测试工具状态（部署/加载/日志/测试）正确展示，失败原因通俗可读
 - 检查摘要失效时一键发布按钮立即锁定
 - 一键发布确认与重启提示
 - 桌面三栏和移动端 Tabs 在长文件名、长命令、长错误下不溢出
 
 ### 12.3 验收场景
 
-使用工坊从零创建 `HelloAi` 指令扩展：用户输入“新增 `/hello` 指令并返回问候语，可配置前缀”，生成 AI 完成清单、配置模型、指令实现和测试。独立审核 AI 发现缺少空前缀场景测试，调试 AI 补充测试并修复实现，复核通过后用户看到功能摘要和使用方式并点击“一键发布”；重启 UniBot 后扩展出现在“已安装扩展”列表且指令可用。
+使用工坊从零创建 `HelloAi` 指令扩展：用户输入“新增 `/hello` 指令并返回问候语，可配置前缀”，生成 AI 完成清单、配置模型、指令实现和测试，并用测试工具把扩展部署到测试环境、加载并运行测试；全部通过后用户看到功能摘要和使用方式并点击“一键发布”；重启 UniBot 后扩展出现在“已安装扩展”列表且指令可用。
 
 以下任一情况必须无法一键发布：
 
@@ -803,7 +794,7 @@ server/src/
 - 扩展 ID 与目录或清单不一致
 - 存在未响应权限请求
 - 测试失败或 Loader 无法加载
-- AI 审核存在“必须修复”问题或审核结果已过期
+- 测试环境部署失败或校验结果已过期
 - 检查通过后文件又发生变化
 - 目标扩展目录已存在
 
@@ -825,7 +816,8 @@ server/src/
 - 实现 Draft Service、OpenCode Gateway 和管理员 API
 - 实现事件归一化、消息恢复、权限回复和停止生成
 - 实现脚手架、检查摘要、启用锁和原子启用
-- 实现独立审核会话、结构化问题单、调试轮次限制和无进展检测
+- 实现测试环境管理（拉取/同步/幂等）与测试工具后端（部署、加载、日志、测试）
+- 编写并注册 OpenCode 测试工具插件（`plugins/`，`@opencode-ai/plugin` 的 `tool()`）
 - 补齐后端单元测试与 OpenCode 契约测试
 
 完成标准：不依赖 WebUi，可通过 Studio API 完成“创建 → 生成 → 自动检查 → 一键发布”。
@@ -835,7 +827,7 @@ server/src/
 - 增加路由、扩展页入口、草稿列表和创建对话框
 - 实现对话时间线、工具状态、权限/问题交互和停止生成
 - 实现文件树、结果摘要、检查面板和可选技术详情
-- 实现 AI 审核进度、自动调试状态和通俗问题摘要
+- 实现测试工具面板（部署/加载/日志/测试状态）和通俗结果摘要
 - 完成桌面与移动端响应式布局
 
 完成标准：验收场景可全程在浏览器完成，刷新后状态可恢复。

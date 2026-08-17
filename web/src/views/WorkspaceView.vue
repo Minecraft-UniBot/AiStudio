@@ -34,7 +34,6 @@ const selectedFile = ref('')
 const fileContent = ref('')
 const fileLoading = ref(false)
 const fileViewerOpen = ref(false)
-const reviewing = ref(false)
 const repairing = ref(false)
 const publishing = ref(false)
 const publishOpen = ref(false)
@@ -42,47 +41,29 @@ const publishOpen = ref(false)
 const reverting = ref(false)
 const revertTarget = ref('')
 const revertOpen = ref(false)
-/** 本地摘要过期标记：发送消息后置 true，审查通过后清除 */
+/** 本地摘要过期标记：发送消息后置 true，校验通过后清除 */
 const revisionDirty = ref(false)
 
 const draft = computed(() => store.currentDraft)
 const busy = computed(() =>
-  ['planning', 'coding', 'debugging'].includes(draft.value?.status),
+  ['planning', 'coding'].includes(draft.value?.status),
 )
-/** 审查真正进行中：status 为 reviewing 且没有待修复的 must_fix（结算出 must_fix 后展示自动修复而非标语） */
-const reviewRunning = computed(
-  () =>
-    reviewing.value ||
-    (draft.value?.status === 'reviewing' &&
-      !(draft.value?.review?.issues ?? []).some((issue) => issue.severity === 'must_fix')),
-)
-const reviewPassed = computed(() => draft.value?.review?.status === 'passed')
 const canPublish = computed(
   () =>
     draft.value?.status === 'ready' &&
-    !revisionDirty.value &&
-    !reviewing.value &&
-    reviewPassed.value,
+    !revisionDirty.value,
 )
 
-// ===== 主操作按钮状态机（三阶段：规划 → 编码 → 审查） =====
+// ===== 主操作按钮状态机（规划 → 编码 → 校验后发布） =====
 const primaryAction = computed(() => {
   const status = draft.value?.status
-  // 规划 / 编码 / 修复中 → 停止
-  if (['planning', 'coding', 'debugging'].includes(status)) {
+  // 规划 / 编码中 → 停止
+  if (['planning', 'coding'].includes(status)) {
     return { label: '停止生成', icon: 'lucide:square', variant: 'danger', handler: stop }
   }
   // 需要用户补充信息（规划阶段提问）
   if (store.pendingQuestions.length > 0) {
     return { label: '需要你确认', icon: 'lucide:help-circle', variant: 'secondary', disabled: true }
-  }
-  // 审查中：有 must_fix → 自动修复；否则审查进行中
-  if (status === 'reviewing') {
-    const mustFix = draft.value?.review?.issues?.some((issue) => issue.severity === 'must_fix')
-    if (mustFix) {
-      return { label: '自动修复', icon: 'lucide:wrench', variant: 'warning', handler: autoFix }
-    }
-    return { label: '审查中…', icon: 'lucide:brain', variant: 'secondary', disabled: true, loading: true }
   }
   // 可发布
   if (status === 'ready') {
@@ -160,9 +141,9 @@ async function refreshAll() {
 
 watch(
   // store.currentDraft 已被 Pinia 自动解包为草稿对象，不能访问 .value
-  () => store.currentDraft?.review_revision,
+  () => store.currentDraft?.validation_revision,
   (revision) => {
-    // 后端摘要变化（审查通过）时清除本地过期标记
+    // 后端摘要变化（校验通过）时清除本地过期标记
     if (revision) revisionDirty.value = false
   },
 )
@@ -171,7 +152,7 @@ watch(
 async function send(text) {
   try {
     await store.sendPrompt(draftId, text)
-    // 发送后文件可能变更，锁定发布直到重新审查
+    // 发送后文件可能变更，锁定发布直到重新校验
     revisionDirty.value = true
   } catch (e) {
     toast_error(e.message)
@@ -209,32 +190,8 @@ async function rejectQuestion(question) {
   }
 }
 
-// ===== 审查 / 修复 =====
-async function review() {
-  reviewing.value = true
-  try {
-    await store.startReview(draftId)
-    await store.fetchDraft(draftId)
-  } catch (e) {
-    toast_error(e.message)
-  } finally {
-    reviewing.value = false
-  }
-}
-
-async function autoFix(includeSuggestions = false) {
-  repairing.value = true
-  try {
-    await store.startDebug(draftId, { include_suggestions: includeSuggestions })
-    await store.fetchDraft(draftId)
-  } catch (e) {
-    toast_error(e.message)
-  } finally {
-    repairing.value = false
-  }
-}
-
-/** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI，AI 修完会重跑校验） */
+// ===== 校验 / 修复 =====
+/** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI 编码会话） */
 async function fixValidation() {
   repairing.value = true
   try {
@@ -329,30 +286,30 @@ onMounted(async () => {
   await refreshAll()
 })
 
-// ===== 审查中轮询 =====
-// 后端结算审查结果依赖 SSE 事件；若 WebSocket 短暂断开或事件丢失，
-// UI 可能一直显示「审查中」。审查进行期间定期拉取草稿状态兜底。
-const REVIEW_POLL_MS = 8000
-let review_poll = null
+// ===== 编码/校验中轮询 =====
+// 编码完成后的自动机械校验依赖 SSE 事件；若 WebSocket 短暂断开或事件丢失，
+// UI 可能一直显示「编码中」。工作期间定期拉取草稿状态兜底。
+const POLL_MS = 8000
+let work_poll = null
 
 watch(
   () => draft.value?.status,
   (status) => {
-    if (status === 'reviewing' && !review_poll) {
-      review_poll = setInterval(() => {
+    if (['planning', 'coding'].includes(status) && !work_poll) {
+      work_poll = setInterval(() => {
         store.fetchDraft(draftId).catch(() => {})
-      }, REVIEW_POLL_MS)
-    } else if (status !== 'reviewing' && review_poll) {
-      clearInterval(review_poll)
-      review_poll = null
+      }, POLL_MS)
+    } else if (!['planning', 'coding'].includes(status) && work_poll) {
+      clearInterval(work_poll)
+      work_poll = null
     }
   },
 )
 
 onUnmounted(() => {
-  if (review_poll) {
-    clearInterval(review_poll)
-    review_poll = null
+  if (work_poll) {
+    clearInterval(work_poll)
+    work_poll = null
   }
 })
 </script>
@@ -368,7 +325,7 @@ onUnmounted(() => {
     />
 
     <!-- 后端错误横幅（校验失败 / 会话错误 / 熔断等）：任何状态都展示，
-         避免「审查通过但机械校验失败」这类状态退回 draft 后错误不可见、没有操作入口 -->
+         避免「编码完成但机械校验失败」这类状态退回 draft 后错误不可见、没有操作入口 -->
     <div v-if="draft.error" class="workspace-banner danger">
       <Icon icon="lucide:alert-triangle" width="14" />
       <span>{{ draft.error }}</span>
@@ -379,7 +336,7 @@ onUnmounted(() => {
       <button
         v-for="tab in [
           { id: 'result', label: '对话' },
-          { id: 'check', label: '审查' },
+          { id: 'check', label: '检查' },
           { id: 'settings', label: '结果与设置' },
         ]"
         :key="tab.id"
@@ -422,7 +379,6 @@ onUnmounted(() => {
         :pending-permissions="store.pendingPermissions"
         :pending-questions="store.pendingQuestions"
         :busy="busy"
-        :reviewing="reviewRunning"
         @send="send"
         @stop="stop"
         @reply-permission="replyPermission"
@@ -445,8 +401,8 @@ onUnmounted(() => {
             <div class="tabs">
               <button class="tab" :class="{ active: activeTab === 'result' }" @click="activeTab = 'result'">功能</button>
               <button class="tab" :class="{ active: activeTab === 'check' }" @click="activeTab = 'check'">
-                审查
-                <span v-if="draft.review" class="tab-dot" :class="draft.review.status" />
+                检查
+                <span v-if="draft.validation" class="tab-dot" :class="draft.validation.status" />
               </button>
               <button class="tab" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">设置</button>
             </div>
@@ -466,14 +422,11 @@ onUnmounted(() => {
               />
             </div>
 
-            <!-- 审查 -->
+            <!-- 检查：机械校验状态 + 重新校验 / 让 AI 修复 / 同步环境 -->
             <div v-else-if="activeTab === 'check'" class="right-scroll">
               <ValidationPanel
                 :draft="draft"
-                :reviewing="reviewing"
                 :repairing="repairing"
-                @review="review"
-                @debug="autoFix"
                 @fix-validation="fixValidation"
                 @check-validation="checkValidation"
                 @sync-env="syncEnv"
@@ -499,10 +452,6 @@ onUnmounted(() => {
                 <Icon icon="lucide:check-circle-2" width="16" />
                 <span>已发布（{{ new Date(draft.published_at).toLocaleString() }}），草稿为只读</span>
               </div>
-              <div v-if="draft.status === 'failed'" class="result-section status-box danger">
-                <Icon icon="lucide:alert-triangle" width="16" />
-                <span>{{ draft.error || '生成失败，可在对话区补充需求后重试' }}</span>
-              </div>
             </div>
           </div>
         </div>
@@ -524,7 +473,7 @@ onUnmounted(() => {
     <Dialog
       v-model="revertOpen"
       title="回退到该消息之前？"
-      description="将撤销这条消息及其后的所有改动，恢复文件状态和对话记录；旧规划与审查结果会失效，需要重新开始。"
+      description="将撤销这条消息及其后的所有改动，恢复文件状态和对话记录；旧规划与校验结果会失效，需要重新开始。"
       confirm-text="确认回退"
       confirm-variant="danger"
       :loading="reverting"

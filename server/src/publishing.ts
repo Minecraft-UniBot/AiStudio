@@ -91,21 +91,13 @@ export function publishDraft(draftId: string): PublishRecord {
 function doPublish(draftId: string, extensionId: string): PublishRecord {
   const draft = readDraft(draftId);
 
-  // 1. 摘要核对：文件必须与最近审查通过时的状态完全一致（Plan 3.4：审查通过才允许发布）
+  // 1. 机械校验必须通过且文件摘要与校验时一致（Plan 3.4：检查通过后文件又变化则锁定发布）
   const current = computeRevision(draftId);
-  if (draft.review_revision !== current || !draft.review_revision) {
-    logger.warn('publish', '发布被拒绝：文件摘要已过期', {
+  if (draft.validation?.status !== 'passed' || draft.validation_revision !== current) {
+    logger.warn('publish', '发布被拒绝：机械校验未通过或文件摘要已过期', {
       draft_id: draftId,
       extension_id: extensionId,
     });
-    throw new PublishError('草稿文件自审查后发生变更，请重新审查后再发布', 'STALE_REVISION');
-  }
-  // 审查必须通过且无未解决的必须修复问题
-  if (!draft.review || draft.review.status !== 'passed') {
-    throw new PublishError('审查未通过，无法发布', 'REVIEW_FAILED');
-  }
-  // 机械校验必须通过且文件摘要与校验时一致（Plan 3.4：检查通过后文件又变化则锁定发布）
-  if (draft.validation?.status !== 'passed' || draft.validation_revision !== current) {
     throw new PublishError('机械校验未通过或文件已变更，请重新检查后再发布', 'VALIDATION_STALE');
   }
 

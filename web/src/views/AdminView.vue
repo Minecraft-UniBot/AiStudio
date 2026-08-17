@@ -140,10 +140,10 @@ function permissionVariant(permission) {
         <h3>功能开关</h3>
         <div class="feature-list">
           <label class="feature-item">
-            <Checkbox v-model="settings.features.review" />
+            <Checkbox v-model="settings.features.test_tools" />
             <div>
-              <span>AI 审核与调试</span>
-              <small>生成后由独立 AI 审核并自动修复问题</small>
+              <span>测试工具（OpenCode 插件）</span>
+              <small>编码时 AI 用 unibot_* 工具在共享测试环境自测</small>
             </div>
           </label>
           <label class="feature-item disabled">

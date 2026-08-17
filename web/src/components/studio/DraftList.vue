@@ -21,13 +21,9 @@ function statusVariant(status) {
     case 'planning':
     case 'coding':
       return 'accent'
-    case 'reviewing':
-    case 'debugging':
-      return 'accent'
     case 'ready':
     case 'published':
       return 'success'
-    case 'failed':
     case 'error':
       return 'danger'
     default:
