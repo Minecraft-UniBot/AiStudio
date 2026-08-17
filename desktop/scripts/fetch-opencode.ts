@@ -108,8 +108,9 @@ if (source === "npm") {
 if (!existsSync(archive)) throw new Error("下载失败，未生成归档文件");
 
 // npm tgz 与 GitHub tar.gz 均为 tar 格式；GitHub zip 用系统 unzip 或 Windows bsdtar。
-// Windows bsdtar 会把含冒号的绝对路径（D:\...）误判为远程主机名
-// （"Cannot connect to D: resolve failed"），因此 Windows 分支用 cwd=tmpDir + 相对归档名。
+// 注意：会把 "D:\..." 绝对路径误判为远程主机名（"Cannot connect to D: resolve failed"）
+// 的是 Git for Windows 自带的 GNU tar（带 RSH 远程归档支持）；System32 的 bsdtar 反而
+// 没有该问题。这里统一规避：Windows 分支用 cwd=tmpDir + 相对归档名，不传入含盘符冒号的参数。
 const isWindowsTar = process.platform === "win32";
 const extractCmd = isWindowsTar
   ? ["tar", "-xf", basename(archive)]
