@@ -5,7 +5,7 @@
  * 口令优先级：环境变量 UNIBOT_STUDIO_PASSWORD > 配置文件 > 首次启动自动生成。
  */
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { StudioConfig } from './types';
@@ -19,7 +19,9 @@ function detectUnibotDir(): string {
   // 2. 从当前文件位置向上找仓库（Studio/server/src -> Studio/server -> Studio -> 仓库根）
   let dir = import.meta.dir;
   for (let i = 0; i < 6; i++) {
-    dir = dir === '/' ? dir : dir.split('/').slice(0, -1).join('/') || '/';
+    const parent = dirname(dir);
+    if (parent === dir) break; // 已到文件系统根（跨平台：POSIX '/' 与 Windows 'C:\' 均在此停止）
+    dir = parent;
     if (existsSync(join(dir, 'UniBot', 'Bot.py'))) return join(dir, 'UniBot');
   }
   // 3. 默认：与 Studio 平级的 UniBot
@@ -98,7 +100,7 @@ function loadConfig(): StudioConfig {
 }
 
 function writeConfig(config: StudioConfig, configFile: string) {
-  mkdirSync(configFile.split('/').slice(0, -1).join('/'), { recursive: true });
+  mkdirSync(dirname(configFile), { recursive: true });
   writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 

@@ -12,7 +12,7 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { config } from './config';
 
 const PROMPTS_DIR = join(import.meta.dir, '..', 'prompts');
@@ -51,7 +51,7 @@ function loadHistory(): PromptHistory {
 
 function persistHistory(history: PromptHistory): void {
   const file = historyFile();
-  mkdirSync(file.split('/').slice(0, -1).join('/'), { recursive: true });
+  mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(history, null, 2) + '\n', 'utf-8');
 }
 

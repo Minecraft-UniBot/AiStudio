@@ -7,7 +7,7 @@
  * （Plan.md 8.1），注册表只决定「是否暴露」与「默认询问策略」。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { config } from './config';
 import type { ToolEntry } from './types';
 
@@ -79,7 +79,7 @@ function loadTools(): ToolEntry[] {
 
 function persistTools(tools: ToolEntry[]): void {
   const file = toolsFile();
-  mkdirSync(file.split('/').slice(0, -1).join('/'), { recursive: true });
+  mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(tools, null, 2) + '\n', 'utf-8');
 }
 
