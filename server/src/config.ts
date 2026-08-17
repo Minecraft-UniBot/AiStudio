@@ -151,18 +151,19 @@ export function docsAllowlist(): string {
 
 /**
  * 扩展市场注册表只读白名单（注入到 OpenCode 会话的安全约束）。
- * 市场注册表是仓库根目录 Market/extensions.json，AI 只读它来了解已有扩展，
- * 优先复用已有能力、避免重复造轮子。
+ * 市场注册表是独立仓库（MineJPGcraft/UniBot.Market），位于工作区根 Market/extensions.json。
+ * 仅当文件真实存在时才纳入白名单：CI 由工作流检出到 Market/，独立部署/全新克隆缺失时
+ * 自动省略，避免安全约束指向不存在的文件、提示词注入失效的市场路径。
  */
 export function marketAllowlistPaths(): string[] {
-  // Studio/server -> Studio -> 仓库根 -> Market/extensions.json
   const repoRoot = join(import.meta.dir, '..', '..', '..');
-  return [join(repoRoot, 'Market', 'extensions.json')];
+  const registry = join(repoRoot, 'Market', 'extensions.json');
+  return existsSync(registry) ? [registry] : [];
 }
 
-/** 市场注册表路径（供 planning/scaffold 提示词引用） */
+/** 市场注册表路径（供 planning/scaffold 提示词引用；注册表缺失时为空字符串，占位符自动省略） */
 export function marketRegistryPath(): string {
-  return marketAllowlistPaths()[0]!;
+  return marketAllowlistPaths()[0] ?? '';
 }
 
 /** 市场注册表格式化文本（注入安全约束） */
