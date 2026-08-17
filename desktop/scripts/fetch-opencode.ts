@@ -15,7 +15,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const DESKTOP_DIR = join(import.meta.dir, "..");
 const VENDOR_OPENCODE = join(DESKTOP_DIR, "vendor", "opencode");
@@ -107,14 +107,19 @@ if (source === "npm") {
 }
 if (!existsSync(archive)) throw new Error("下载失败，未生成归档文件");
 
-// npm tgz 与 GitHub tar.gz 均为 tar 格式；GitHub zip 用系统 unzip 或 Windows bsdtar
-const extractCmd =
-  source === "github" && spec.githubAsset.endsWith(".zip") && process.platform !== "win32"
+// npm tgz 与 GitHub tar.gz 均为 tar 格式；GitHub zip 用系统 unzip 或 Windows bsdtar。
+// Windows bsdtar 会把含冒号的绝对路径（D:\...）误判为远程主机名
+// （"Cannot connect to D: resolve failed"），因此 Windows 分支用 cwd=tmpDir + 相对归档名。
+const isWindowsTar = process.platform === "win32";
+const extractCmd = isWindowsTar
+  ? ["tar", "-xf", basename(archive)]
+  : source === "github" && spec.githubAsset.endsWith(".zip")
     ? ["unzip", "-o", archive, "-d", tmpDir]
-    : process.platform === "win32"
-      ? ["tar", "-xf", archive, "-C", tmpDir]
-      : ["tar", "-xzf", archive, "-C", tmpDir];
-const run = spawnSync(extractCmd[0]!, [...extractCmd.slice(1)], { stdio: "inherit" });
+    : ["tar", "-xzf", archive, "-C", tmpDir];
+const run = spawnSync(extractCmd[0]!, [...extractCmd.slice(1)], {
+  cwd: isWindowsTar ? tmpDir : undefined,
+  stdio: "inherit",
+});
 if (run.status !== 0) throw new Error(`解压失败：${extractCmd.join(" ")}`);
 
 // 在解压目录中定位可执行文件（npm 包位于 package/bin/opencode，GitHub 资产为顶层二进制）

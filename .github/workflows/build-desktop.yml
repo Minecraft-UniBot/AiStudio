@@ -68,19 +68,23 @@ jobs:
         with:
           bun-version: latest
 
+      # 缓存整个 ~/.hutch（含 state/store.json 所有权标记），而不是仅缓存子目录：
+      # hutch 0.11.0 起，installer 的 bootstrap-install 会校验「未标记」的 home——
+      # 若恢复出的 ~/.hutch 缺 state/store.json 且带 toolchains/ 等额外目录，
+      # 会拒绝认领并报 "refusing to claim an unmarked Hutch home"。
+      # 整目录缓存 + 更换 key 让首次运行干净认领并写入标记，之后每次恢复完整已标记 home。
       - name: Cache Hutch store
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.hutch/releases
-            ~/.hutch/toolchains
-          key: hutch-${{ matrix.name }}-2.0.1-beta.14
+          path: ~/.hutch
+          key: hutch-store-${{ matrix.name }}-2.0.1-beta.14
 
+      # 固定 hutch 版本（0.11.0 起 installer 校验未标记 home；浮动 latest 会再次意外变更行为）
       - name: Install Hutch (macOS/Linux)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
+          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh -s -- --version 0.11.0
           echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
           "$HOME/.hutch/bin/hutch" --version
 
