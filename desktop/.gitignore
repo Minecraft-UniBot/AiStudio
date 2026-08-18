@@ -6,9 +6,6 @@ artifacts/
 # 打包暂存目录（由 scripts/stage.ts 与 scripts/fetch-opencode.ts 生成）
 vendor/
 
-# 单文件版：嵌入清单由 scripts/build-portable.ts 自动生成
-portable/generated-assets.ts
-
 # 依赖
 node_modules/
 bun.lockb

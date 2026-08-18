@@ -57,27 +57,20 @@ cd web && bun run dev
 
 ## 桌面客户端（Electrobun）
 
-`desktop/` 提供跨平台桌面客户端（macOS / Windows / Linux）：安装包**自带 opencode**（无需用户单独安装），安装后即为「后端 + 前端」一体应用，直接打开工坊窗口。
+`desktop/` 提供跨平台**原生窗口**桌面应用（macOS ARM64 / Windows x64 / Linux x64）：
+内置 opencode（无需用户单独安装），「后端 + 前端」一体，双击即打开工坊窗口。
 
 ```bash
 cd desktop
 bun scripts/fetch-opencode.ts     # 下载内置 opencode（npm registry，约 45MB）
-bun run build:production          # 构建当前平台安装包（产物在 desktop/artifacts/）
+bun run build:production          # 构建当前平台（产物在 desktop/artifacts/）
 ```
 
 - 开发、配置与常见问题：见 [`desktop/README.md`](desktop/README.md)
 - 打包工作流：`.github/workflows/build-desktop.yml`（手动触发，或推送 tag `desktop-v*` 自动构建并创建 Release 草稿）
-
-不想用安装包？`desktop/` 还提供**单文件可运行版**（`bun run build:portable`，产物为单个可执行文件，
-运行自动打开浏览器进入工坊，首次联网自动下载 opencode 引擎；CI/Release 发布 macOS ARM64 版，
-本机也可自建其他平台版本）：
-
-```bash
-cd desktop
-bun run build:portable            # 产物：desktop/artifacts/portable/UniBotStudio-<平台>-<架构>
-```
-
-详见 [`desktop/README.md`](desktop/README.md) 的「单文件可运行版」一节。
+- **交付物**：只发布三平台自包含的 **app 归档**（`*.tar.zst`，解压即点开即用，原生窗口），
+  不发布安装包（`.dmg` / `*-Setup.zip` / `*-Setup.tar.gz`）；Electrobun 无 macOS x64 核心，
+  Intel Mac 用 Web 版（`cd web && bun run dev`）
 
 ## 配置
 
