@@ -84,6 +84,8 @@ const placeholder = computed(() =>
 
 /** 距底部多少像素内视为「在底部」 */
 const BOTTOM_THRESHOLD = 56
+/** 用户离开底部后，静默多久自动滚回底部（毫秒） */
+const FOLLOW_IDLE_MS = 5000
 
 const near_bottom = ref(true)
 let follow_timer = null
@@ -94,19 +96,33 @@ function is_near_bottom() {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD
 }
 
-function scrollToBottom() {
+/**
+ * 滚动到底部。
+ * - smooth=false（默认）：即时跳转，用于流式跟随——平滑动画在 200ms 级的高频刷新下
+ *   会被不断打断重来，滚动位置追不上增长的底部；
+ * - smooth=true：平滑滚动，用于挂载和「离开底部后自动回底」（距离大，柔和过渡更自然）。
+ */
+function scrollToBottom(smooth = false) {
   nextTick(() => {
-    scrollEl.value?.scrollTo({ top: scrollEl.value.scrollHeight, behavior: 'smooth' })
+    const el = scrollEl.value
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
   })
 }
 
-/** 用户离开底部后保持不打扰；若 5s 无任何滚动操作（没动静），再自动滚到底部 */
+/** 用户离开底部后保持不打扰：以「最后一次滚动」为基准，静默 5s 后自动滚回底部 */
 function arm_follow_timer() {
   if (follow_timer) return // 已在计时，只等用户 5s 无动静
   follow_timer = setTimeout(() => {
     follow_timer = null
-    if (!near_bottom.value) scrollToBottom()
-  }, 5000)
+    if (!near_bottom.value) scrollToBottom(true)
+  }, FOLLOW_IDLE_MS)
+}
+
+/** 重新武装：从最后一次滚动开始重新计算 5s 静默窗口 */
+function reset_follow_timer() {
+  cancel_follow_timer()
+  arm_follow_timer()
 }
 
 function cancel_follow_timer() {
@@ -114,15 +130,25 @@ function cancel_follow_timer() {
   follow_timer = null
 }
 
-/** 用户主动滚动：更新是否在底部，并取消待执行的自动滚动 */
+/**
+ * 用户滚动：更新是否在底部。
+ * - 回到底部 → 取消待执行的自动滚动；
+ * - 仍离开底部且有待执行的回底计划 → 重置静默倒计时（而不是取消）。
+ *   旧实现一滚动就 cancel，用户看历史时 5s 内滚动任意一格就会让自动回底永久失效，
+ *   之后一直闲着也不会再触发——「5s 无任何滚动操作再自动回底」实际无效。
+ */
 function onScroll() {
   near_bottom.value = is_near_bottom()
-  cancel_follow_timer()
+  if (near_bottom.value) {
+    cancel_follow_timer()
+  } else if (follow_timer) {
+    reset_follow_timer()
+  }
 }
 
 // 滚动跟随：新消息追加，或最后一条消息内容更新（工具输出 / 文本流式刷新）时
-// - 用户在底部 → 立即滚动
-// - 用户不在底部（正在看历史）→ 不打扰；5s 没动静再滚到底部
+// - 用户在底部 → 即时跳转到底部（流式更新下平滑动画追不上，用 auto 保证始终贴底）
+// - 用户不在底部（正在看历史）→ 不打扰；5s 无任何滚动操作再平滑滚回底部
 watch(
   () => props.messages[props.messages.length - 1],
   () => {
@@ -131,7 +157,7 @@ watch(
   },
 )
 
-onMounted(scrollToBottom)
+onMounted(() => scrollToBottom(true))
 onUnmounted(cancel_follow_timer)
 
 async function send() {

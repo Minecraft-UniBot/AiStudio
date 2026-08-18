@@ -7,6 +7,7 @@ import { useStudioStore } from '@/stores/studio'
 import { use_toast } from '@/composables/use_toast'
 import DraftList from '@/components/studio/DraftList.vue'
 import DraftCreateDialog from '@/components/studio/DraftCreateDialog.vue'
+import UnibotDirSetupDialog from '@/components/studio/UnibotDirSetupDialog.vue'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 
@@ -16,6 +17,8 @@ const { success: toast_success, error: toast_error } = use_toast()
 
 const loading = ref(false)
 const dialogOpen = ref(false)
+// UniBot 目录引导：首次登录（后端尚未显式配置）时自动弹出，让用户选择 UniBot 目录
+const dirSetupOpen = ref(false)
 
 onMounted(async () => {
   loading.value = true
@@ -23,6 +26,10 @@ onMounted(async () => {
     await store.fetchStatus()
     await store.fetchDrafts()
     await store.fetchOptions()
+    // status 拉取后再判断：未配置则弹出引导（仅本次登录首次，用户可「稍后再说」）
+    if (store.status && store.status.unibot_configured === false) {
+      dirSetupOpen.value = true
+    }
   } finally {
     loading.value = false
   }
@@ -43,6 +50,12 @@ async function removeDraft(draft) {
     toast_error(e.message)
   }
 }
+
+// UniBot 目录保存成功后：刷新状态（让顶部状态徽章 / 发布逻辑读到新目录）
+function onUnibotDirSaved() {
+  store.fetchStatus()
+  toast_success('UniBot 目录已保存，发布目标已更新')
+}
 </script>
 
 <template>
@@ -59,6 +72,14 @@ async function removeDraft(draft) {
         </Badge>
       </div>
       <div class="topbar-right">
+        <Button
+          v-if="store.status && store.status.unibot_configured === false"
+          variant="warning"
+          size="sm"
+          @click="dirSetupOpen = true"
+        >
+          <Icon icon="lucide:folder-input" width="15" /> 设置 UniBot 目录
+        </Button>
         <Button variant="ghost" size="sm" @click="router.push('/admin')">
           <Icon icon="lucide:settings" width="15" /> 设置
         </Button>
@@ -81,6 +102,26 @@ async function removeDraft(draft) {
         </div>
       </div>
 
+      <!-- 未配置 UniBot 目录的提示条：跳过后仍可从此入口重新设置 -->
+      <div
+        v-if="store.status && store.status.unibot_configured === false"
+        class="setup-banner"
+        role="note"
+      >
+        <Icon icon="lucide:triangle-alert" width="16" class="banner-icon" />
+        <div class="banner-body">
+          <span class="banner-title">尚未设置 UniBot 目录</span>
+          <span class="banner-text">
+            发布扩展前需要确认 UniBot 根目录，否则无法交付到
+            <code>Extensions/</code>。当前探测目录：
+            <code>{{ store.status.unibot_dir || '未探测到' }}</code>
+          </span>
+        </div>
+        <Button size="sm" variant="primary" @click="dirSetupOpen = true">
+          <Icon icon="lucide:folder-input" width="14" /> 去设置
+        </Button>
+      </div>
+
       <DraftList
         :drafts="store.drafts"
         :loading="loading"
@@ -92,6 +133,12 @@ async function removeDraft(draft) {
     </main>
 
     <DraftCreateDialog v-model="dialogOpen" />
+    <UnibotDirSetupDialog
+      v-model:open="dirSetupOpen"
+      :current-dir="store.status?.unibot_dir ?? ''"
+      :onboarding="true"
+      @saved="onUnibotDirSaved"
+    />
   </div>
 </template>
 
@@ -176,6 +223,53 @@ async function removeDraft(draft) {
   margin: 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+
+/* 未配置 UniBot 目录提示条 */
+.setup-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+  background: var(--warning-soft);
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-md);
+}
+
+.banner-icon {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+.banner-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.banner-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.banner-text {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.banner-text code {
+  padding: 0 4px;
+  background: rgb(255 255 255 / 0.7);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
 }
 
 @media (max-width: 640px) {

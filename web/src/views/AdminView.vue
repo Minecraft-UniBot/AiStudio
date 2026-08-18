@@ -12,6 +12,7 @@ import Badge from '@/components/ui/Badge.vue'
 import Textarea from '@/components/ui/Textarea.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import Select from '@/components/ui/Select.vue'
+import UnibotDirSetupDialog from '@/components/studio/UnibotDirSetupDialog.vue'
 
 const router = useRouter()
 const store = useStudioStore()
@@ -21,6 +22,8 @@ const settings = ref(null)
 const tools = ref([])
 const prompts = ref([])
 const saving = ref(false)
+// UniBot 目录设置对话框（编辑现有目录 / 首次未配置时引导）
+const dirSetupOpen = ref(false)
 
 // 提示词编辑
 const editingPrompt = ref(null) // { name, content, version }
@@ -42,6 +45,17 @@ async function loadAll() {
   if (results[0].status === 'fulfilled') settings.value = results[0].value
   if (results[1].status === 'fulfilled') tools.value = results[1].value
   if (results[2].status === 'fulfilled') prompts.value = results[2].value
+  // 未配置 UniBot 目录时主动弹出引导
+  if (settings.value && settings.value.unibot_configured === false) {
+    dirSetupOpen.value = true
+  }
+}
+
+// 设置 UniBot 目录后：刷新设置与平台状态（顶部徽章 / 发布逻辑读到新目录）
+function onUnibotDirSaved() {
+  loadAll()
+  store.fetchStatus()
+  toast_success('UniBot 目录已保存')
 }
 
 async function saveSettings() {
@@ -221,17 +235,46 @@ function permissionVariant(permission) {
 
       <!-- 目录信息 -->
       <section class="card">
-        <h3>目录信息</h3>
+        <div class="card-head-row">
+          <h3>UniBot 目录</h3>
+          <Button size="sm" variant="primary" @click="dirSetupOpen = true">
+            <Icon icon="lucide:pencil" width="13" /> 修改目录
+          </Button>
+        </div>
+        <!-- 未配置提示 -->
+        <div
+          v-if="settings && settings.unibot_configured === false"
+          class="dir-warn"
+          role="note"
+        >
+          <Icon icon="lucide:triangle-alert" width="15" />
+          <span>
+            当前目录为启动时自动探测，尚未由你确认。发布扩展前请先设置 UniBot 根目录。
+          </span>
+        </div>
         <dl class="info-grid">
-          <dt>平台数据</dt>
-          <dd class="mono">{{ store.status?.data_dir ?? '~/.unibot-studio' }}</dd>
           <dt>UniBot 目录</dt>
-          <dd class="mono">{{ store.status?.unibot_dir }}</dd>
+          <dd class="mono dir-cell">
+            <Icon icon="lucide:folder-tree" width="13" class="dir-icon" />
+            <span>{{ settings?.unibot_dir ?? store.status?.unibot_dir ?? '未设置' }}</span>
+            <Badge v-if="settings?.unibot_configured" variant="success" class="dir-badge">已确认</Badge>
+            <Badge v-else variant="warning" class="dir-badge">待确认</Badge>
+          </dd>
           <dt>扩展目录</dt>
-          <dd class="mono">{{ store.status?.extensions_dir }}</dd>
+          <dd class="mono">{{ settings?.extensions_dir ?? store.status?.extensions_dir }}</dd>
+          <dt>平台数据</dt>
+          <dd class="mono">{{ settings?.data_dir ?? store.status?.data_dir ?? '~/.unibot-studio' }}</dd>
         </dl>
       </section>
     </main>
+
+    <!-- UniBot 目录设置对话框 -->
+    <UnibotDirSetupDialog
+      v-model:open="dirSetupOpen"
+      :current-dir="settings?.unibot_dir ?? store.status?.unibot_dir ?? ''"
+      :onboarding="false"
+      @saved="onUnibotDirSaved"
+    />
 
     <!-- 提示词编辑器 -->
     <Dialog
@@ -315,6 +358,55 @@ function permissionVariant(permission) {
   margin: 0 0 var(--space-2);
   font-size: var(--text-md);
   font-weight: 600;
+}
+
+.card-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.card-head-row h3 {
+  margin: 0;
+}
+
+/* UniBot 目录卡片：未确认提示 + 目录行徽章 */
+.dir-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--warning-soft);
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  color: #92400e;
+  line-height: 1.5;
+}
+
+.dir-warn svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warning);
+}
+
+.dir-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dir-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.dir-badge {
+  flex-shrink: 0;
 }
 
 .card-sub {
