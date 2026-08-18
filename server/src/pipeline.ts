@@ -74,6 +74,9 @@ export async function startCoding(draftId: string): Promise<void> {
     allowlist: workspace,
     market_path: marketRegistryPath(),
   }, security);
+  // 状态先行：进入编码运行态后再发送提示词，前端立即显示「编码中」；
+  // promptAsync 失败时由调用方（events.settleSessionState）回滚为 draft
+  updateDraft(draftId, { status: 'coding', phase: 'coding' });
   await client.session.promptAsync({
     path: { id: draft.session_id },
     body: {
@@ -83,7 +86,6 @@ export async function startCoding(draftId: string): Promise<void> {
     },
     query: { directory: workspace },
   });
-  updateDraft(draftId, { status: 'coding', phase: 'coding' });
   logger.info('draft', '规划完成，进入编码阶段', {
     draft_id: draftId,
     extension_id: draft.extension_id,

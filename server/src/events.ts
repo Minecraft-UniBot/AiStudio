@@ -326,6 +326,21 @@ const LAST_IDLE = new Map<string, number>();
 const IDLE_DEDUP_MS = 2000;
 
 /**
+ * 结算节流：协调循环每 2s 轮询一次，但一次 idle 结算往往伴随长耗时动作
+ * （planning→coding 的 promptAsync、编码完成后的机械校验——机械校验执行期间
+ * 草稿 status 仍停留在 coding），此时协调循环再次看到「阶段状态 + 会话 idle」
+ * 就会重复触发结算：
+ *   - coding→校验 的第二发会撞上 runValidation 的并发锁，
+ *     catch 分支会把草稿误置为 draft + error（前端状态乱跳，表现为「无法正确判断
+ *     正在进行」）；
+ *   - planning→coding 的第二发会把编码提示词重复发送。
+ * 真实 SSE idle 事件是一次性的（且已被 IDLE_DEDUP_MS 去重），协调循环只是兜底，
+ * 因此对「刚结算过」的会话做 60s 节流即可；新一轮运行开始（busy）时清除标记。
+ */
+const LAST_SETTLED = new Map<string, number>();
+const SETTLE_THROTTLE_MS = 60_000;
+
+/**
  * 编码完成后自动执行机械校验（AGENT.md 3.5：不再有独立审核 AI，校验流水线把关）：
  * - 校验通过 → ready（可一键发布）
  * - 校验失败 → 回到 draft + 错误说明（前端提供「让 AI 修复校验问题」入口）
@@ -333,6 +348,13 @@ const IDLE_DEDUP_MS = 2000;
  */
 async function settleCodingAndValidate(draftId: string): Promise<void> {
   try {
+    // 并发防御：机械校验已在执行时直接跳过（协调循环 2s 轮询可能在
+    // 校验结束前再次触发结算，节流窗口外仍需此防线兜底）
+    const current = readDraft(draftId);
+    if (current.validation?.status === 'running') {
+      logger.debug('events', '机械校验已在执行，跳过重复结算', { draft_id: draftId });
+      return;
+    }
     const run = await runValidation(draftId);
     broadcast({ type: 'validation.updated', draft_id: draftId, run });
     if (run.status === 'passed') {
@@ -395,6 +417,10 @@ async function reconcileStuckDrafts(): Promise<void> {
       });
       const statuses = (res.data ?? {}) as Record<string, { type?: string }>;
       if (statuses[sessionId]?.type === 'idle') {
+        // 结算节流：刚处理过 idle 结算的会话（如机械校验进行中）不再由协调循环
+        // 重复结算，避免 2s 轮询在结算动作完成前反复触发（见 LAST_SETTLED 注释）
+        const key = `${draft.id}:${sessionId}`;
+        if (Date.now() - (LAST_SETTLED.get(key) ?? 0) < SETTLE_THROTTLE_MS) continue;
         logger.info('events', '调和：会话已空闲但草稿仍停留在阶段状态，主动结算', {
           draft_id: draft.id,
           status: draft.status,
@@ -433,9 +459,12 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
 
   const isIdle = ev.type === 'session.idle' || (ev.type === 'session.status' && ev.status === 'idle');
   if (!isIdle) {
-    // 新一轮运行开始（busy）→ 清除旧的闲置标记，避免后续真实完成被误判为重复事件
+    // 新一轮运行开始（busy）→ 清除旧的闲置/结算标记，避免后续真实完成被误判为重复事件，
+    // 或被结算节流误拦（新一轮运行不应沿用上一轮的节流时间戳）
     if (ev.type === 'session.status' && ev.status === 'busy') {
-      LAST_IDLE.delete(`${draftId}:${sessionId}`);
+      const key = `${draftId}:${sessionId}`;
+      LAST_IDLE.delete(key);
+      LAST_SETTLED.delete(key);
     }
     return;
   }
@@ -444,6 +473,9 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
   const now = Date.now();
   if (now - (LAST_IDLE.get(idleKey) ?? 0) < IDLE_DEDUP_MS) return;
   LAST_IDLE.set(idleKey, now);
+  // 记录结算时间：协调循环在 SETTLE_THROTTLE_MS 内不再对该会话重复结算
+  //（结算动作如机械校验可能持续数秒到数十秒，期间 status 仍停留在阶段状态）
+  LAST_SETTLED.set(idleKey, now);
 
   let draft;
   try {

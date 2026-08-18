@@ -5,8 +5,8 @@
  * 口令优先级：环境变量 UNIBOT_STUDIO_PASSWORD > 配置文件 > 首次启动自动生成。
  */
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { mkdirSync, existsSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { StudioConfig } from './types';
 
@@ -45,6 +45,7 @@ function loadConfig(): StudioConfig {
   const base: StudioConfig = {
     data_dir: dataDir,
     unibot_dir: detectUnibotDir(),
+    unibot_configured: false,
     extensions_dir: join(detectUnibotDir(), 'Extensions'),
     host: process.env.UNIBOT_STUDIO_HOST ?? '127.0.0.1',
     port: Number(process.env.UNIBOT_STUDIO_PORT ?? 9876),
@@ -117,7 +118,13 @@ function writeConfig(config: StudioConfig, configFile: string) {
   writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
-/** 持久化配置（保存时保留自动生成的口令） */
+/**
+ * 持久化配置（保存时保留自动生成的口令）。
+ *
+ * 重要：合并后回写到内存中的 `config`（Object.assign），使运行时各模块
+ * （publishing.ts / drafts.ts / registry.ts）立即读到新值，无需重启进程。
+ * 旧实现只落盘不回写内存，导致 /settings 改完不生效直到下次重启。
+ */
 export function saveConfig(patch: Partial<StudioConfig>): StudioConfig {
   const merged: StudioConfig = {
     ...config,
@@ -129,7 +136,43 @@ export function saveConfig(patch: Partial<StudioConfig>): StudioConfig {
     auth: { ...config.auth, ...(patch.auth ?? {}) },
   };
   writeConfig(merged, join(config.data_dir, 'config', 'studio.json'));
+  // 同步内存配置：逐字段回写，避免 import 拿到的旧引用读到过期值
+  Object.assign(config, merged);
   return merged;
+}
+
+/**
+ * 设置并校验 UniBot 目录。
+ *
+ * 校验：目录存在，且看起来像 UniBot 仓库根（含 Bot.py 或 Extensions/ 之一），
+ * 避免用户随手填一个不存在/非 UniBot 的路径导致发布落到错误位置。
+ * 通过则更新 unibot_dir / extensions_dir 并标记 unibot_configured=true，立即生效并落盘。
+ *
+ * @returns 校验失败时返回 { ok:false, error }；成功返回 { ok:true }
+ */
+export function setUnibotDir(dir: string): { ok: true } | { ok: false; error: string } {
+  const trimmed = (dir ?? '').trim();
+  if (!trimmed) return { ok: false, error: 'UniBot 目录不能为空' };
+  const abs = resolve(trimmed);
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) {
+    return { ok: false, error: `目录不存在：${abs}` };
+  }
+  // 识别 UniBot 仓库根：Bot.py（源码根）或 Extensions/（运行根）至少有一个
+  const looksLikeUnibot = existsSync(join(abs, 'Bot.py')) || existsSync(join(abs, 'Extensions'));
+  if (!looksLikeUnibot) {
+    return {
+      ok: false,
+      error: '该目录看起来不像 UniBot：未找到 Bot.py 或 Extensions 目录',
+    };
+  }
+  saveConfig({
+    unibot_dir: abs,
+    extensions_dir: join(abs, 'Extensions'),
+    unibot_configured: true,
+  });
+  // 发布目录可能不存在（全新 UniBot），创建一下避免首次发布报错
+  mkdirSync(join(abs, 'Extensions'), { recursive: true });
+  return { ok: true };
 }
 
 export const config: StudioConfig = loadConfig();

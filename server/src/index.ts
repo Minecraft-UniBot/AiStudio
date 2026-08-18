@@ -6,7 +6,7 @@
  */
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { ensureDataDirs, saveConfig, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
+import { ensureDataDirs, saveConfig, setUnibotDir, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
 import { config } from './config';
 import { issueToken, verifyToken } from './auth';
 import { opencode, resolvePermissionTarget, normalizeProviders } from './opencode';
@@ -20,6 +20,7 @@ import {
   DraftError,
   draftWorkspace,
   ensureGitWorkspace,
+  inferResumeStatus,
   listDrafts,
   listFiles,
   readDraft,
@@ -114,6 +115,7 @@ async function handleRequest(req: Request): Promise<Response> {
     return json({
       ...opencode.getStatus(),
       unibot_dir: config.unibot_dir,
+      unibot_configured: config.unibot_configured,
       extensions_dir: config.extensions_dir,
       unibot_env: getUnibotEnvStatus(),
     });
@@ -360,23 +362,31 @@ async function handleRequest(req: Request): Promise<Response> {
             const body = (await req.json()) as { text?: string };
             if (!body.text?.trim()) return errorJson('消息不能为空');
             const sessionId = draft.session_id ?? (await ensureSession(draft, client, workspace));
-            await client.session.promptAsync({
-              path: { id: sessionId },
-              body: { parts: [{ type: 'text', text: body.text }] },
-              query: { directory: workspace },
-            });
-            // 新消息会触发 opencode 的 revert cleanup（物理删除被回退的消息），
-            // 因此清除暂存过滤标记，避免把新消息也过滤掉。
-            // 状态恢复：abort 后用户重新发消息视为「继续当前阶段」，按 phase 恢复 status，
-            // 否则流水线在会话再次空闲时不会自动进入下一阶段（planning→coding 等）。
-            const resumeStatus =
-              draft.phase === 'planning' || draft.phase === 'coding'
-                ? draft.phase
-                : 'draft';
+            // 状态先行，再发送提示词：先把草稿置为运行阶段（前端立即显示「进行中」、
+            // 切换停止按钮；会话空闲时也能正确触发下一阶段结算）。
+            // phase 缺失（回退/旧草稿/会话错误恢复后）时按工作区是否已有 PLAN.md
+            // 推断阶段，避免「AI 已在工作但界面仍显示空闲」的判断错误。
+            const resumeStatus = inferResumeStatus(draft);
             updateDraft(draftId, {
               status: resumeStatus,
+              phase: resumeStatus,
+              // 新消息会触发 opencode 的 revert cleanup（物理删除被回退的消息），
+              // 因此清除暂存过滤标记，避免把新消息也过滤掉。
               ...(draft.revert_message_id ? { revert_message_id: null } : {}),
             });
+            broadcast({ type: 'draft.updated', draft_id: draftId, status: resumeStatus });
+            try {
+              await client.session.promptAsync({
+                path: { id: sessionId },
+                body: { parts: [{ type: 'text', text: body.text }] },
+                query: { directory: workspace },
+              });
+            } catch (e) {
+              // 发送失败：回滚运行态，避免草稿永久停留在「进行中」
+              updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
+              broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+              throw e;
+            }
             logger.info('draft', '发送新消息', {
               draft_id: draftId,
               extension_id: draft.extension_id,
@@ -392,7 +402,16 @@ async function handleRequest(req: Request): Promise<Response> {
             // 必须让事件回调看到非阶段状态，避免「中止」被误判为「阶段完成」而自动进入下一阶段；
             // phase 保留，用户重新发消息时恢复（见 messages 端点）。
             updateDraft(draftId, { status: 'draft' });
-            await client.session.abort({ path: { id: draft.session_id }, query: { directory: workspace } });
+            try {
+              await client.session.abort({ path: { id: draft.session_id }, query: { directory: workspace } });
+            } catch (e) {
+              // abort 失败：AI 仍在运行，恢复阶段状态，避免界面误显示「已停止」
+              const rollback =
+                draft.phase === 'planning' || draft.phase === 'coding' ? draft.phase : 'draft';
+              updateDraft(draftId, { status: rollback });
+              broadcast({ type: 'draft.updated', draft_id: draftId, status: rollback });
+              throw e;
+            }
             logger.info('draft', '停止生成', { draft_id: draftId, extension_id: draft.extension_id });
             return json({ ok: true });
           }
@@ -517,12 +536,19 @@ async function handleRequest(req: Request): Promise<Response> {
               '\n\n修复完成后，用测试工具（unibot_deploy + unibot_run_tests）在测试环境验证，' +
               '并等待系统自动重新校验。';
             updateDraft(draftId, { status: 'coding', phase: 'coding' });
-            await client.session.promptAsync({
-              path: { id: sessionId },
-              body: { parts: [{ type: 'text', text: prompt }] },
-              query: { directory: workspace },
-            });
             broadcast({ type: 'draft.updated', draft_id: draftId, status: 'coding' });
+            try {
+              await client.session.promptAsync({
+                path: { id: sessionId },
+                body: { parts: [{ type: 'text', text: prompt }] },
+                query: { directory: workspace },
+              });
+            } catch (e) {
+              // 发送失败：回滚运行态，避免草稿永久停留在「编码中」且无可恢复路径
+              updateDraft(draftId, { status: 'draft', phase: null, error: (e as Error).message });
+              broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+              throw e;
+            }
             logger.info('draft', '让 AI 修复机械校验问题', {
               draft_id: draftId,
               extension_id: draft.extension_id,
@@ -669,12 +695,37 @@ async function handleRequest(req: Request): Promise<Response> {
         features: config.features,
         defaults: config.defaults,
         opencode: { version: config.opencode.version, data_dir: config.opencode.data_dir },
+        unibot_dir: config.unibot_dir,
+        unibot_configured: config.unibot_configured,
+        extensions_dir: config.extensions_dir,
+        data_dir: config.data_dir,
       });
     }
     if (req.method === 'PATCH') {
       const body = (await req.json()) as Record<string, unknown>;
+      // 单独处理 UniBot 目录设置：需要校验目录是否为合法 UniBot 根
+      if (typeof body.unibot_dir === 'string') {
+        const result = setUnibotDir(body.unibot_dir);
+        if (!result.ok) return errorJson(result.error, 1, 400);
+        return json({
+          features: config.features,
+          defaults: config.defaults,
+          unibot_dir: config.unibot_dir,
+          unibot_configured: config.unibot_configured,
+          extensions_dir: config.extensions_dir,
+          data_dir: config.data_dir,
+        });
+      }
+      // 其余字段（功能开关等）走通用合并保存
       const next = saveConfig(body as never);
-      return json({ features: next.features, defaults: next.defaults });
+      return json({
+        features: next.features,
+        defaults: next.defaults,
+        unibot_dir: next.unibot_dir,
+        unibot_configured: next.unibot_configured,
+        extensions_dir: next.extensions_dir,
+        data_dir: next.data_dir,
+      });
     }
   }
 

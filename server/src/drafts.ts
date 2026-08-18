@@ -354,3 +354,17 @@ export function assertPromptable(draft: DraftMeta) {
     throw new DraftError('后台任务进行中，请稍候', 'BUSY');
   }
 }
+
+/**
+ * 推断发送新消息后草稿应恢复到的运行阶段：
+ * - phase 有效（abort 后继续 / 校验失败后修复）→ 沿用 phase；
+ * - phase 缺失（回退 revert / 旧版草稿 / 会话错误恢复后）→ 按工作区是否已有
+ *   规划产物（PLAN.md）推断：已有规划说明此前已进入过编码，继续按编码处理；
+ *   否则按规划处理。
+ * 返回始终是运行阶段（planning/coding），保证「AI 开始工作前状态先进入运行态」，
+ * 前端据此正确显示进行中，会话空闲时也能正常触发下一阶段结算。
+ */
+export function inferResumeStatus(draft: DraftMeta): 'planning' | 'coding' {
+  if (draft.phase === 'planning' || draft.phase === 'coding') return draft.phase;
+  return existsSync(join(draftWorkspace(draft.id), 'PLAN.md')) ? 'coding' : 'planning';
+}

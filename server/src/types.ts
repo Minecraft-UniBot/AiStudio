@@ -196,7 +196,11 @@ export interface UnibotEnvStatus {
 /** 平台配置（config/studio.json） */
 export interface StudioConfig {
   data_dir: string;
+  /** UniBot 根目录（发布目标 Extensions/ 的父目录） */
   unibot_dir: string;
+  /** 是否已由用户显式配置 UniBot 目录（false = 启动时自动探测，需在首次登录时引导确认） */
+  unibot_configured: boolean;
+  /** UniBot 扩展发布目录（unibot_dir/Extensions） */
   extensions_dir: string;
   host: string;
   port: number;
