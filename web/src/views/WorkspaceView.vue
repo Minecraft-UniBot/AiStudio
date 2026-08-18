@@ -319,7 +319,6 @@ onUnmounted(() => {
     <DevelopmentToolbar
       :draft="draft"
       :connected="store.connected"
-      :opencode-available="store.opencodeAvailable"
       :primary-action="primaryAction"
       @back="router.push('/')"
     />
@@ -619,7 +618,8 @@ onUnmounted(() => {
 .right-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-1) var(--space-4) var(--space-4);
+  /* 顶部留出更宽的内边距，让右侧内容（功能摘要/校验/设置）与标题栏边缘保持距离 */
+  padding: var(--space-4) var(--space-4) var(--space-4);
 }
 
 .expand-left,

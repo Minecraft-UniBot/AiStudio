@@ -8,7 +8,6 @@ import Badge from '@/components/ui/Badge.vue'
 defineProps({
   draft: { type: Object, required: true },
   connected: { type: Boolean, default: false },
-  opencodeAvailable: { type: Boolean, default: false },
   /** 主操作按钮（Plan 3.4）：{ label, icon, variant, handler, disabled, loading } | null */
   primaryAction: { type: Object, default: null },
 })
@@ -45,10 +44,6 @@ function statusVariant(status) {
       <Badge :variant="connected ? 'success' : 'warning'">
         <span class="status-dot" />
         {{ connected ? '实时连接' : '重连中' }}
-      </Badge>
-      <Badge :variant="opencodeAvailable ? 'success' : 'neutral'">
-        <span class="status-dot" />
-        OpenCode
       </Badge>
       <Button
         v-if="primaryAction"
