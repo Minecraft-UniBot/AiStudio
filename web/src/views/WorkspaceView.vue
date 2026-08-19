@@ -18,6 +18,7 @@ import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 import Spinner from '@/components/ui/Spinner.vue'
 import FileViewer from '@/components/studio/FileViewer.vue'
+import TemplatePreview from '@/components/studio/TemplatePreview.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,7 +26,7 @@ const store = useStudioStore()
 const { success: toast_success, error: toast_error } = use_toast()
 
 const draftId = route.params.id
-const activeTab = ref('result') // result | check | settings
+const activeTab = ref('result') // result | preview | check | settings
 const leftCollapsed = ref(false)
 const rightCollapsed = ref(false)
 const fileTree = ref([])
@@ -52,6 +53,12 @@ const canPublish = computed(
   () =>
     draft.value?.status === 'ready' &&
     !revisionDirty.value,
+)
+/** 是否为渲染包（模板）扩展：有 Templates 目录才显示预览图标 */
+const draftHasTemplates = computed(
+  () =>
+    Array.isArray(store.files) &&
+    store.files.some((f) => f.path.startsWith('Templates/')),
 )
 
 // ===== 主操作按钮状态机（规划 → 编码 → 校验后发布） =====
@@ -335,6 +342,7 @@ onUnmounted(() => {
       <button
         v-for="tab in [
           { id: 'result', label: '对话' },
+          { id: 'preview', label: '预览' },
           { id: 'check', label: '检查' },
           { id: 'settings', label: '结果与设置' },
         ]"
@@ -399,6 +407,10 @@ onUnmounted(() => {
           <div class="panel-head">
             <div class="tabs">
               <button class="tab" :class="{ active: activeTab === 'result' }" @click="activeTab = 'result'">功能</button>
+              <button class="tab" :class="{ active: activeTab === 'preview' }" @click="activeTab = 'preview'">
+                预览
+                <Icon v-if="draftHasTemplates" icon="lucide:layout-template" width="12" />
+              </button>
               <button class="tab" :class="{ active: activeTab === 'check' }" @click="activeTab = 'check'">
                 检查
                 <span v-if="draft.validation" class="tab-dot" :class="draft.validation.status" />
@@ -419,6 +431,11 @@ onUnmounted(() => {
                 :publishing="publishing"
                 @publish="openPublish"
               />
+            </div>
+
+            <!-- 模板预览：渲染包/模板扩展的 iframe 实时预览 -->
+            <div v-else-if="activeTab === 'preview'" class="preview-holder">
+              <TemplatePreview :draft-id="draftId" />
             </div>
 
             <!-- 检查：机械校验状态 + 重新校验 / 让 AI 修复 / 同步环境 -->
@@ -620,6 +637,14 @@ onUnmounted(() => {
   overflow-y: auto;
   /* 顶部留出更宽的内边距，让右侧内容（功能摘要/校验/设置）与标题栏边缘保持距离 */
   padding: var(--space-4) var(--space-4) var(--space-4);
+}
+
+.preview-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: var(--space-3);
+  display: flex;
 }
 
 .expand-left,

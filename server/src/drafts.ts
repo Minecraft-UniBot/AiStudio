@@ -184,14 +184,31 @@ function renderManifest(opts: {
   types: ExtensionType[];
 }): string {
   const typesStr = opts.types.map((t) => `"${t}"`).join(', ');
-  return MANIFEST_SCAFFOLD
+  let body = MANIFEST_SCAFFOLD
     .replaceAll('{{extension_id}}', opts.extensionId)
     .replaceAll('{{name}}', opts.name)
     .replaceAll('{{description}}', opts.description)
     .replaceAll('{{types}}', typesStr);
+  // 无代码类型补上对应目录声明，保证模板/资源扩展开箱即用（Loader 约定目录名）
+  if (opts.types.includes('resources') && !body.includes('\n[resources]')) {
+    body += `\n[resources]
+root = "Resources"
+`;
+  }
+  if (opts.types.includes('template') && !body.includes('\n[template]')) {
+    body += `\n[template]
+entry = "Templates"
+`;
+  }
+  return body;
 }
 
-/** 写入最小代码入口与占位测试（新草稿/模板克隆的代码基础，AI 会在此基础上实现） */
+/** 该扩展类型组合是否需要代码入口（api/command/renderer 任一即命中） */
+export function hasCodeType(types: ExtensionType[]): boolean {
+  return types.some((t) => CODE_TYPES.includes(t));
+}
+
+/** 写最小代码入口与占位测试（代码型扩展的起始基础，AI 会在此基础上实现） */
 function writeCodeScaffold(workspace: string, name: string) {
   writeFileSync(join(workspace, '__init__.py'), INIT_SCAFFOLD.replaceAll('{{name}}', name), 'utf-8');
   mkdirSync(join(workspace, 'tests'), { recursive: true });
@@ -204,9 +221,11 @@ function writeCodeScaffold(workspace: string, name: string) {
 
 /**
  * 从开发模板生成草稿脚手架。
- * - template 为 `minimal`（或省略）：写入内置最小脚手架（清单 + 入口 + 占位测试）；
+ * - template 为 `minimal`（或省略）：写入内置脚手架；
  * - template 为 `Default` 等扩展模板：克隆模板源码到工作区，并用用户的
- *   id/名称/描述/类型重写 Extension.toml，再补齐代码入口与占位测试，AI 在此基础上改写。
+ *   id/名称/描述/类型重写 Extension.toml。
+ * 仅当目标是代码型扩展（api/command/renderer）时才补 `__init__.py` 与占位测试；
+ * 无代码的模板/资源扩展不长入口，源码即模板开局。
  */
 export function scaffoldDraftWorkspace(
   workspace: string,
@@ -219,12 +238,15 @@ export function scaffoldDraftWorkspace(
     logger.info('draft', '从扩展模板创建脚手架', {
       template: templateId,
       extension_id: opts.extensionId,
+      types: opts.types,
     });
   } else {
     writeFileSync(join(workspace, 'Extension.toml'), renderManifest(opts), 'utf-8');
   }
-  // 无论何种模板，都补齐代码入口与占位测试，AI 在此基础上继续实现
-  writeCodeScaffold(workspace, opts.name);
+  if (hasCodeType(opts.types)) {
+    // 代码型补救代码入口与占位测试（无论来源是最小脚手架还是模板克隆）
+    writeCodeScaffold(workspace, opts.name);
+  }
 }
 
 /** 重写已克隆模板的 Extension.toml：id/name/description/types（解析→改动→序列化） */
@@ -407,9 +429,12 @@ export function readDraftFile(draftId: string, rel: string): string {
   return readFileSync(full, 'utf-8');
 }
 
+/** 代码型扩展类型（需要 __init__.py 入口与代码校验）；无代码类型（template/resources）相反 */
+export const CODE_TYPES: ExtensionType[] = ['api', 'command', 'renderer'];
+
 /** 扩展 ID 合法性与类型校验（创建表单用） */
 export function sanitizeTypes(types: string[]): ExtensionType[] {
-  const allowed: ExtensionType[] = ['api', 'command'];
+  const allowed: ExtensionType[] = ['api', 'command', 'renderer', 'template', 'resources'];
   const filtered = types.filter((t): t is ExtensionType =>
     allowed.includes(t as ExtensionType),
   );

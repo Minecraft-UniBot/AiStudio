@@ -48,6 +48,7 @@ import {
 } from './test_tools';
 import { assertFeatureEnabled } from './registry';
 import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './templates';
+import { PreviewError, listTemplateNames, renderTemplatePreview } from './preview';
 import type { DraftMeta } from './types';
 
 // ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效；签发/校验见 auth.ts） =====
@@ -513,6 +514,27 @@ async function handleRequest(req: Request): Promise<Response> {
             return json(res.data ?? []);
           }
           return json([]);
+        }
+        case 'preview': {
+          // 模板预览：渲染包/模板扩展的 Jinja2 渲染预览（工作台右栏 iframe）
+          if (req.method === 'POST') {
+            const body = (await req.json().catch(() => ({}))) as { template?: string };
+            try {
+              return json(await renderTemplatePreview(draftId, body.template ?? ''));
+            } catch (e) {
+              if (e instanceof PreviewError) return errorJson(e.message, 1, 400);
+              return errorJson(`模板预览失败：${(e as Error).message}`, 1, 400);
+            }
+          }
+          if (req.method === 'GET') {
+            try {
+              return json({ templates: await listTemplateNames(draftId) });
+            } catch (e) {
+              if (e instanceof PreviewError) return errorJson(e.message, 1, 400);
+              return errorJson(`模板列表读取失败：${(e as Error).message}`, 1, 400);
+            }
+          }
+          break;
         }
         case 'check': {
           if (req.method === 'POST') {

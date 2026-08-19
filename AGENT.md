@@ -13,7 +13,7 @@
 
 第一版目标：
 
-- 从空白模板创建一个目录型代码扩展，支持 `api`、`command` 类型
+- 从模板/脚手架创建一个目录型扩展，支持 `command`、`api` 代码型以及 `template`、`resources` 无代码型
 - 用一句话描述需求，实时看到 AI 正在做什么和最终能提供什么功能
 - 自动在隔离目录执行清单校验、语法检查、Ruff 和扩展专项测试
 - 检查失败时优先由 AI 自动修复，必要时用通俗问题向用户补充提问
@@ -22,7 +22,7 @@
 
 第一版不做：
 
-- 不生成 NoneBot 插件、渲染器、模板或资源包
+- 不生成 NoneBot 插件、渲染器（renderer）扩展
 - 不允许 AI 修改 UniBot 核心代码、配置、用户数据或已有扩展
 - 不直接提交 Git、不创建 GitHub 仓库、不自动发布扩展市场
 - 不提供多人同时编辑同一草稿
@@ -69,20 +69,21 @@ flowchart LR
 | 扩展 ID | 必填，PascalCase；创建后不可修改；不得与现有扩展或草稿冲突 |
 | 显示名称 | 必填 |
 | 功能描述 | 必填，作为第一条需求上下文 |
-| 扩展类型 | 多选，第一版仅 `api`、`command` |
-| **开发模板** | 可选；`Default`（启动时从 GitHub 拉取的扩展模板，默认）或 `minimal`（内置最小脚手架） |
+| 扩展类型 | 单选：渲染包扩展（`template`）／资源扩展（`resources`）／代码扩展（后者下方再细分指令 `command`、API `api`） |
+| 模板 | 由扩展类型自动决定，不单独选择：渲染包/资源 → `Default` 模板；代码 → 内置最小脚手架 |
 | 模型 | 从 OpenCode `/config/providers` 返回的已连接模型中选择 |
 | Agent | 默认 `build`；只展示后端允许的 Agent |
 
-**开发模板扩展（templates/index.ts）**：平台支持以“扩展模板”为起点创建草稿。初始化时从 GitHub
-（`Minecraft-UniBot/Extension.Default`）拉取并缓存 Default 扩展作为默认模板；新建草稿选择模板后，
-把模板源码克隆进工作区，并自动重写 `Extension.toml` 的 `id/name/description/types`（版本重置为
-`0.1.0`），再由 AI 在此基础改写；未选择模板（`minimal`）时退回内置最小脚手架。模板注册表在
-`server/src/templates.ts`，拉取采用 GitHub codeload tar.gz + 系统 `tar` 解压，缓存于
-`<data_dir>/templates/<id>/`（带 `template.json` 标记避免重复拉取）。模板选择通过
-`GET /api/studio/templates` 暴露，`POST /api/studio/templates/:id/pull` 可随时补齐。
+**开发模板扩展（templates.ts）**：平台以“扩展模板”为起点创建草稿。初始化时从 GitHub
+（`Minecraft-UniBot/Extension.Default`）拉取并缓存 Default 扩展作为默认模板；新建草稿时模板由
+扩展类型自动决定——渲染包/资源扩展克隆 Default 的 `Templates/`、`Resources/` 素材起步，代码扩展
+从内置最小脚手架开始。无论何种模板，都会用用户的 id/名称/描述/类型重写 `Extension.toml`
+（版本重置为 `0.1.0`），再由 AI 在此基础改写。模板注册表在 `server/src/templates.ts`，拉取采用
+GitHub codeload tar.gz + 系统 `tar` 解压，缓存于 `<data_dir>/templates/<id>/`
+（带 `template.json` 标记避免重复拉取）。模板状态通过 `GET /api/studio/templates` 暴露，
+`POST /api/studio/templates/:id/pull` 可随时补齐。
 
-创建时由后端写入扩展脚手架：
+创建时由后端写入扩展脚手架（无代码的模板/资源扩展**不生成** `__init__.py`，源码即素材开局）：
 
 ```text
 <studio_data>/drafts/<draft_id>/
@@ -90,9 +91,11 @@ flowchart LR
 └── workspace/
     └── <ExtensionId>/
         ├── Extension.toml
-        ├── __init__.py
+        ├── __init__.py         # 仅代码型（command/api/renderer）生成
+        ├── Templates/          # 渲染包：克隆自 Default 模板
+        ├── Resources/          # 资源/模板：克隆自 Default 模板
         └── tests/
-            └── test_extension.py
+            └── test_extension.py  # 仅代码型生成
 ```
 
 脚手架创建后，Studio Server 建立 OpenCode session，并通过 `noReply` 注入扩展规范、允许路径、校验命令和用户填写的概要，随后发送第一条实现请求。
@@ -115,10 +118,10 @@ flowchart LR
 
 - 左栏宽度约 240px，可折叠；展示草稿状态、文件树和会话历史
 - 中栏是主操作面，消息流按 `text`、`reasoning`、`tool`、`error` 分块渲染
-- 右栏宽度约 42%，使用 `功能 / 设置 / 检查` Tabs，可折叠；源码、Diff 和日志收纳在“技术详情”中
+- 右栏宽度约 42%，使用 `功能 / 预览 / 检查 / 设置` Tabs，可折叠；源码、Diff 和日志收纳在“技术详情”中。**预览** Tab 用 iframe srcdoc 实时渲染渲染包/模板扩展（Jinja2 + 内置测试数据，见 3.6）
 - 输入框固定在中栏底部；生成中“发送”切换为带 `lucide:square` 的停止按钮
 - 顶部工具栏展示 OpenCode 连接状态、当前模型、会话消耗与草稿状态
-- 手机端改为单栏，使用 `对话 / 结果 / 设置` Tabs；底部保留输入区
+- 手机端改为单栏，使用 `对话 / 预览 / 检查 / 结果与设置` Tabs；底部保留输入区
 
 视觉沿用 UniBot WebUi 的设计语言（白色层级背景、1px 边框、6–8px 圆角、蓝色主操作色），但作为独立应用自带设计变量，不依赖 WebUi 的样式文件。代码、diff 和终端输出使用等宽字体；新增成功、警告、删除三种 diff 背景变量。
 
@@ -187,6 +190,14 @@ flowchart LR
 - 测试环境被污染时可通过「同步测试环境」重建（见 3.4）
 
 AI 用工具自测并确认通过后，会话空闲时系统自动运行机械校验（与 `unibot_validate` 一致的流水线），校验通过草稿进入 `ready` 可一键发布；校验失败回到 `confirming`，由 AI 读取失败步骤修复后重新校验。
+
+### 3.6 模板预览（工作台）
+
+对**渲染包/模板扩展**草稿，工作台右栏提供「预览」Tab：后端用 Jinja2（复用 UniBot venv 内的
+jinja2 与受限子进程）把草稿 `Templates/` 下的某个模板渲染成完整 HTML（含 `Base.css` 与模板自身
+CSS，二者同为 Jinja2 一起渲染），前端用 `iframe srcdoc` 实时展示。预览内置占位测试数据
+（`Server / List / Luck / About / Bound / Help` 各模板的字段，见 `server/validation/preview_template.py`），
+文件变化后防抖重渲染，模板名可切换。实现：`server/src/preview.ts`（编排）+ `server/validation/preview_template.py`（渲染，含最小 Jinja 全局函数兜底，避免 `random`/`resource_url` 等报错）。仅渲染草稿工作区内的 `Templates` 目录，不写任何文件。
 
 ## 四、状态模型
 
@@ -325,6 +336,8 @@ Studio Server 维护一条到 OpenCode `/event` 的 SSE 连接，按 `sessionID`
 | `GET` | `/api/studio/drafts/{id}/files/content` | 读取受限路径的文件内容 |
 | `GET` | `/api/studio/drafts/{id}/diff` | 获取会话 diff |
 | `GET` | `/api/studio/drafts/{id}/todo` | 获取会话待办 |
+| `GET` | `/api/studio/drafts/{id}/preview` | 获取草稿可预览的模板名列表 |
+| `POST` | `/api/studio/drafts/{id}/preview` | 渲染指定模板为 HTML（Jinja2 + 内置测试数据），供 iframe 预览 |
 | `POST` | `/api/studio/drafts/{id}/permissions/{permission_id}` | 回复权限请求 |
 | `POST` | `/api/studio/drafts/{id}/questions/{question_id}` | 回复结构化问题 |
 | `POST` | `/api/studio/drafts/{id}/validate` | 启动校验流水线 |
@@ -731,6 +744,7 @@ server/src/
     ├── validation.ts
     ├── test_tools.ts # 测试工具后端实现：插件回调（部署/加载/日志/测试）
     ├── templates.ts # 开发模板注册表：拉取/缓存扩展模板、克隆进草稿、清单重写
+    ├── preview.ts    # 模板预览：Jinja2 渲染草稿 Templates → 完整 HTML
     ├── publishing.ts
     ├── prompts.ts
     ├── config.ts      # 平台配置与功能开关（features.json 等）
@@ -746,6 +760,7 @@ server/src/
 - `validation.ts`：校验流水线编排与结构化结果（步骤可配置，子进程调用 UniBot 校验脚本）
 - `test_tools.ts`：OpenCode 插件测试工具的后端实现——草稿部署/移除到测试环境、加载与绑定诊断、日志读取、测试运行（受 5.2 路径校验与 8.2 子进程约束）
 - `templates.ts`：开发模板注册表——扩展模板（Default）的 GitHub 拉取/缓存、克隆进草稿、Extension.toml 清单重写；`minimal` 为内置最小脚手架回退
+- `preview.ts`：模板预览编排——调用预览渲染脚本把草稿 Templates 目录的模板用 Jinja2 渲染成完整 HTML（工作台右栏 iframe 预览）
 - `publishing.ts`：校验通过后的原子发布（本地目录 / UniBot API）
 - `prompts.ts`：提示词模板管理：版本化、编辑、预览、启用与回滚
 - `config.ts`：平台配置读写与校验（功能开关、默认模型、Agent 配置）

@@ -245,6 +245,11 @@ export function validationScriptPath(): string {
   return join(resSrcDir(), '..', 'validation', 'validate_extension.py');
 }
 
+/** 模板预览渲染脚本绝对路径（server/validation/preview_template.py） */
+export function previewScriptPath(): string {
+  return join(resSrcDir(), '..', 'validation', 'preview_template.py');
+}
+
 /** 初始化平台数据目录结构 */
 export function ensureDataDirs() {
   for (const dir of [

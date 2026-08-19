@@ -29,7 +29,9 @@ function makeDraft(partial: Partial<DraftMeta>): DraftMeta {
 
 describe('sanitizeTypes', () => {
   test('过滤非法类型', () => {
-    expect(sanitizeTypes(['command', 'renderer'])).toEqual(['command']);
+    expect(sanitizeTypes(['command', 'renderer'])).toEqual(['command', 'renderer']);
+    expect(sanitizeTypes(['template', 'resources'])).toEqual(['template', 'resources']);
+    expect(sanitizeTypes(['command', 'not_a_type', 'bogus'])).toEqual(['command']);
   });
 
   test('空类型抛错', () => {

@@ -73,6 +73,70 @@ def _check_manifest(ext_dir: Path) -> None:
     )
 
 
+def _read_manifest(ext_dir: Path):
+    """读取并解析清单；失败返回 None。"""
+    from Scripts.Extensions.Base import parse_manifest
+    from Scripts.Extensions.Errors import ManifestError
+
+    manifest_path = ext_dir / 'Extension.toml'
+    if not manifest_path.exists():
+        return None
+    try:
+        return parse_manifest(manifest_path.read_text('utf-8'))
+    except ManifestError:
+        return None
+
+
+def _manifest_type_names(manifest) -> set[str]:
+    """清单声明的扩展类型名集合（如 {'template','resources'}）。"""
+    if not manifest or not getattr(manifest, 'extension', None):
+        return set()
+    raw = getattr(manifest.extension, 'types', None) or []
+    names: set[str] = set()
+    for item in raw:
+        v = item.value if hasattr(item, 'value') else str(item)
+        names.add(v)
+    return names
+
+
+def _has_code_type(manifest) -> bool:
+    """是否存在代码型类型（api/command/renderer）——需要 __init__.py 入口与代码校验。"""
+    code_types = {'api', 'command', 'renderer'}
+    return bool(_manifest_type_names(manifest) & code_types)
+
+
+def _check_assets(ext_dir: Path) -> None:
+    """无代码扩展（模板/资源）的目录与清单一致性校验（代码型自动跳过）。"""
+    manifest = _read_manifest(ext_dir)
+    names = _manifest_type_names(manifest)
+    is_template = 'template' in names
+    is_resources = 'resources' in names
+    if not is_template and not is_resources:
+        _step('assets', '模板/资源目录', True, '非无代码扩展，跳过')
+        return
+    if is_template and not manifest.template:
+        _step('assets', '模板/资源目录', False, '清单缺少 [template] 配置')
+        return
+    if is_resources and not getattr(manifest, 'resources', None):
+        _step('assets', '模板/资源目录', False, '清单缺少 [resources] 配置')
+        return
+    problems: list[str] = []
+    if is_template:
+        t_entry = getattr(manifest.template, 'entry', None) or 'Templates'
+        target = (ext_dir / t_entry).resolve()
+        if not target.is_dir():
+            problems.append(f'模板目录「{t_entry}」不存在')
+    if is_resources:
+        root = getattr(manifest.resources, 'root', None) or 'Resources'
+        target = (ext_dir / root).resolve()
+        if not target.is_dir():
+            problems.append(f'资源目录「{root}」不存在')
+    if problems:
+        _step('assets', '模板/资源目录', False, '；'.join(problems))
+    else:
+        _step('assets', '模板/资源目录', True, '，'.join(names))
+
+
 def _check_syntax(ext_dir: Path) -> None:
     """Python 语法检查 + import 边界检查。"""
     errors: list[str] = []
@@ -300,10 +364,13 @@ def main() -> int:
         fn()
 
     run_step('manifest', lambda: _check_manifest(ext_dir))
-    run_step('syntax', lambda: _check_syntax(ext_dir))
-    run_step('ruff', lambda: _check_ruff(ext_dir, unibot_root))
-    run_step('tests', lambda: _check_tests(ext_dir, unibot_root))
-    run_step('loader', lambda: _check_loader(ext_dir, unibot_root))
+    run_step('assets', lambda: _check_assets(ext_dir))
+    # 无代码（模板/资源）扩展不需要代码型校验：入口缺失/无 Python 时跳过 loader/ruff/tests
+    if _has_code_type(_read_manifest(ext_dir)):
+        run_step('syntax', lambda: _check_syntax(ext_dir))
+        run_step('ruff', lambda: _check_ruff(ext_dir, unibot_root))
+        run_step('tests', lambda: _check_tests(ext_dir, unibot_root))
+        run_step('loader', lambda: _check_loader(ext_dir, unibot_root))
     run_step('dependencies', lambda: _check_dependencies(ext_dir))
 
     ok = all(step['ok'] for step in STEPS)

@@ -2,12 +2,12 @@
  * 开发模板扩展测试：清单重写、目录复制与最小脚手架生成。
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { copyTree } from '../src/templates';
-import { rewriteClonedManifest, scaffoldDraftWorkspace } from '../src/drafts';
+import { rewriteClonedManifest, scaffoldDraftWorkspace, hasCodeType } from '../src/drafts';
 
 function tmpdirAt(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), `studio-${prefix}-`));
@@ -109,5 +109,45 @@ describe('scaffoldDraftWorkspace (minimal)', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
+  });
+
+  test('无代码类型（模板/资源）不生成 __init__.py，并声明模板/资源目录', () => {
+    const ws = tmpdirAt('workspace-assets');
+    try {
+      scaffoldDraftWorkspace(
+        ws,
+        { extensionId: 'ArtPack', name: '美术包', description: '模板与资源', types: ['template', 'resources'] },
+        'minimal',
+      );
+      expect(existsSync(join(ws, '__init__.py'))).toBe(false);
+      expect(existsSync(join(ws, 'tests'))).toBe(false);
+      const toml = readFileSync(join(ws, 'Extension.toml'), 'utf-8');
+      expect(toml).toMatch(/\[template\]/);
+      expect(toml).toMatch(/\[resources\]/);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('代码型 + 模板组合仍生成 __init__.py', () => {
+    const ws = tmpdirAt('workspace-mixed');
+    try {
+      scaffoldDraftWorkspace(
+        ws,
+        { extensionId: 'Mixed', name: '混合', description: '代码+模板', types: ['api', 'template'] },
+        'minimal',
+      );
+      expect(existsSync(join(ws, '__init__.py'))).toBe(true);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('hasCodeType', () => {
+  test('区分代码型与无代码型', () => {
+    expect(hasCodeType(['command'])).toBe(true);
+    expect(hasCodeType(['api', 'resources'])).toBe(true);
+    expect(hasCodeType(['template', 'resources'])).toBe(false);
   });
 });

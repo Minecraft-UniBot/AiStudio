@@ -1,5 +1,6 @@
 <script setup>
-// 新建扩展草稿对话框（Plan 3.1：ID / 名称 / 描述 / 类型 / 模型 / Agent / 模板）
+// 新建扩展草稿对话框（Plan 3.1：ID / 名称 / 描述 / 扩展类型 / 模板 / 模型 / Agent）
+// 扩展类型为主选择：渲染包（模板）/ 资源 / 代码；选代码后再细分指令或 API，模板由类型自动决定。
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
@@ -23,8 +24,8 @@ const form = ref({
   extension_id: '',
   name: '',
   description: '',
-  types: ['command'],
-  template_id: 'Default',
+  extension_kind: 'code', // code | template | resources
+  code_types: ['command'], // 仅代码型：细分 command / api
   provider_id: '',
   model_id: '',
   agent: 'build',
@@ -35,39 +36,76 @@ watch(open, (val) => {
   if (val) store.fetchTemplates().catch(() => {})
 })
 
-// 模板选项：内置 minimal（最小脚手架）+ 已拉取的扩展模板（如 Default）
-const templateOptions = computed(() => {
-  const list = store.templates
-  const options = []
-  for (const t of list) {
-    options.push({
-      value: t.id,
-      label: t.name,
-      description: t.kind === 'minimal' ? '内置最小脚手架（API/Command）' : t.description,
-    })
+/** 扩展类型主选项（单选） */
+const kindOptions = [
+  { value: 'template', label: '渲染包扩展' },
+  { value: 'resources', label: '资源扩展' },
+  { value: 'code', label: '代码扩展' },
+]
+
+/** 代码型子选项（仅 kind=code 时显示） */
+const codeTypeOptions = [
+  { value: 'command', label: TYPE_LABELS.command },
+  { value: 'api', label: TYPE_LABELS.api },
+]
+
+/** 依据主类型推导提交的 types */
+const payload_types = computed(() => {
+  switch (form.value.extension_kind) {
+    case 'template':
+      return ['template']
+    case 'resources':
+      return ['resources']
+    default:
+      return form.value.code_types.length ? form.value.code_types : ['command']
   }
-  return options
 })
 
-/** 当前所选是否为 extension 模板且尚未就绪 */
-const selectedTemplate = computed(() =>
-  store.templates.find((t) => t.id === form.value.template_id),
-)
+/** 依据主类型推导使用的开发模板 */
+const chosen_template_id = computed(() => {
+  // 渲染包/资源 → Default 模板；代码型 → 内置最小脚手架
+  return form.value.extension_kind === 'code' ? 'minimal' : 'Default'
+})
 
-/** 模板选择提示文案 */
-const templateHint = computed(() => {
-  const t = selectedTemplate.value
-  if (!t) return ''
-  if (t.kind === 'minimal') return '内置最小脚手架：从空白清单 + 入口 + 占位测试开始，AI 直接实现'
-  return t.description
+/** 是否需要 Default 扩展模板（渲染包/资源场景） */
+const needs_default = computed(() => form.value.extension_kind !== 'code')
+
+/** Default 模板是否已就绪 */
+const default_ready = computed(() => {
+  const t = store.templates.find((x) => x.id === 'Default')
+  return t ? t.installed : false
+})
+
+/** 模板选择提示文案（由主类型自动决定，不再单独弹模板下拉） */
+const kindHint = computed(() => {
+  switch (form.value.extension_kind) {
+    case 'template':
+      return '从默认模板（Default）克隆 Templates 素材起步，AI 帮你定制版式与配色'
+    case 'resources':
+      return '从默认模板（Default）克隆 Resources 素材起步，AI 帮你整理图片/字体/样式片段'
+    default:
+      return `内置最小脚手架：从空白的 ${form.value.code_types.map((t) => TYPE_LABELS[t]).join(' / ') || '代码'} 开始，AI 直接实现`
+  }
+})
+
+/** 描述占位文案（随扩展类型变化） */
+const description_placeholder = computed(() => {
+  switch (form.value.extension_kind) {
+    case 'template':
+      return '例如：把列表/状态卡片做成更清爽的版式，主色改成墨绿'
+    case 'resources':
+      return '例如：内置一套方块纹理背景图与配套字体'
+    default:
+      return '例如：新增 /weather 指令查询天气，可配置城市和语言'
+  }
 })
 
 async function retryPullTemplate() {
-  if (!selectedTemplate.value) return
+  if (!needs_default.value) return
   pulling.value = true
   try {
-    const updated = await store.pullTemplate(selectedTemplate.value.id)
-    const ready = updated.find((t) => t.id === selectedTemplate.value.id)
+    const updated = await store.pullTemplate('Default')
+    const ready = updated.find((t) => t.id === 'Default')
     if (ready?.installed) toast_success(`模板「${ready.name}」已就绪`)
   } catch (e) {
     toast_error(e.message)
@@ -94,14 +132,24 @@ async function create() {
     toast_error('请填写扩展 ID、显示名称和功能描述')
     return
   }
+  // 代码型至少选一种细分类型
+  if (form.value.extension_kind === 'code' && form.value.code_types.length === 0) {
+    toast_error('请至少选择一种扩展类型（指令或 API）')
+    return
+  }
+  // 需要 Default 模板但未就绪：阻止提交并提示先拉取
+  if (needs_default.value && !default_ready.value) {
+    toast_error('渲染/资源模板尚未就绪，请先点「立即拉取」')
+    return
+  }
   creating.value = true
   try {
     const draft = await store.createDraft({
       extension_id: form.value.extension_id,
       name: form.value.name,
       description: form.value.description,
-      types: form.value.types,
-      template_id: form.value.template_id,
+      types: payload_types.value,
+      template_id: chosen_template_id.value,
       model:
         form.value.provider_id && form.value.model_id
           ? { provider_id: form.value.provider_id, model_id: form.value.model_id }
@@ -117,10 +165,10 @@ async function create() {
   }
 }
 
-function toggleType(type) {
-  form.value.types = form.value.types.includes(type)
-    ? form.value.types.filter((x) => x !== type)
-    : [...form.value.types, type]
+function toggleCodeType(type) {
+  form.value.code_types = form.value.code_types.includes(type)
+    ? form.value.code_types.filter((x) => x !== type)
+    : [...form.value.code_types, type]
 }
 </script>
 
@@ -149,18 +197,16 @@ function toggleType(type) {
         <Textarea
           v-model="form.description"
           :rows="3"
-          placeholder="例如：新增 /weather 指令查询天气，可配置城市和语言"
+          :placeholder="description_placeholder"
         />
         <span class="form-hint">作为第一条需求上下文</span>
       </div>
       <div class="field">
-        <label class="form-label">开发模板</label>
-        <Select v-model="form.template_id" :options="templateOptions" placeholder="选择开发模板" />
-        <div v-if="templateOptions.length" class="form-hint">
-          {{ templateHint }}
-        </div>
-        <div v-if="selectedTemplate?.kind === 'extension' && !selectedTemplate.installed" class="form-hint danger">
-          <span>模板「{{ selectedTemplate.name }}」尚未就绪（启动时后台拉取中）。</span>
+        <label class="form-label">扩展类型</label>
+        <Select v-model="form.extension_kind" :options="kindOptions" placeholder="选择扩展类型" />
+        <span class="form-hint">{{ kindHint }}</span>
+        <div v-if="needs_default && !default_ready" class="form-hint danger">
+          <span>渲染/资源模板「Default」尚未就绪（启动时后台拉取中），需要先就绪才能创建该类扩展。</span>
           <button type="button" class="link" :disabled="pulling" @click="retryPullTemplate">
             {{ pulling ? '拉取中…' : '立即拉取' }}
           </button>
@@ -169,24 +215,25 @@ function toggleType(type) {
           {{ store.templatesError }}
         </span>
       </div>
-      <div class="field">
-        <label class="form-label">扩展类型</label>
+      <div v-if="form.extension_kind === 'code'" class="field">
+        <label class="form-label">代码类型</label>
         <div class="type-group">
           <button
-            v-for="type in ['command', 'api']"
-            :key="type"
+            v-for="type in codeTypeOptions"
+            :key="type.value"
             type="button"
             class="type-chip"
-            :class="{ active: form.types.includes(type) }"
-            @click="toggleType(type)"
+            :class="{ active: form.code_types.includes(type.value) }"
+            @click="toggleCodeType(type.value)"
           >
             <Icon
-              :icon="form.types.includes(type) ? 'lucide:check' : 'lucide:plus'"
+              :icon="form.code_types.includes(type.value) ? 'lucide:check' : 'lucide:plus'"
               width="13"
             />
-            {{ TYPE_LABELS[type] }}
+            {{ type.label }}
           </button>
         </div>
+        <span class="form-hint">指令扩展发送 /xxx 指令，API 扩展提供可复用的服务能力</span>
       </div>
       <div class="field">
         <label class="form-label">模型</label>

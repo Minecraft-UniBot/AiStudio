@@ -158,6 +158,18 @@ export const useStudioStore = defineStore('studio', () => {
     return data.content
   }
 
+  // ---- 模板预览 ----
+  /** 获取草稿可预览的模板名列表 */
+  async function fetchPreviewNames(id) {
+    const data = await api(`/drafts/${id}/preview`)
+    return (data && data.templates) || []
+  }
+
+  /** 渲染指定模板为 HTML，返回 { html, template, templates } */
+  async function renderPreview(id, template) {
+    return await api(`/drafts/${id}/preview`, { method: 'POST', body: { template: template || '' } })
+  }
+
   // ---- 校验 / 发布 ----
   /** 让 AI 修复机械校验失败项（后端把失败步骤作为问题单喂给 AI 编码会话） */
   async function debugValidation(id) {
@@ -314,6 +326,8 @@ export const useStudioStore = defineStore('studio', () => {
     fetchTodo,
     fetchFiles,
     fetchFileContent,
+    fetchPreviewNames,
+    renderPreview,
     debugValidation,
     checkValidation,
     syncUnibotEnv,
