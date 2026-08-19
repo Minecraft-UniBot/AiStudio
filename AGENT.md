@@ -70,10 +70,19 @@ flowchart LR
 | 显示名称 | 必填 |
 | 功能描述 | 必填，作为第一条需求上下文 |
 | 扩展类型 | 多选，第一版仅 `api`、`command` |
+| **开发模板** | 可选；`Default`（启动时从 GitHub 拉取的扩展模板，默认）或 `minimal`（内置最小脚手架） |
 | 模型 | 从 OpenCode `/config/providers` 返回的已连接模型中选择 |
 | Agent | 默认 `build`；只展示后端允许的 Agent |
 
-创建时由后端写入最小目录型脚手架：
+**开发模板扩展（templates/index.ts）**：平台支持以“扩展模板”为起点创建草稿。初始化时从 GitHub
+（`Minecraft-UniBot/Extension.Default`）拉取并缓存 Default 扩展作为默认模板；新建草稿选择模板后，
+把模板源码克隆进工作区，并自动重写 `Extension.toml` 的 `id/name/description/types`（版本重置为
+`0.1.0`），再由 AI 在此基础改写；未选择模板（`minimal`）时退回内置最小脚手架。模板注册表在
+`server/src/templates.ts`，拉取采用 GitHub codeload tar.gz + 系统 `tar` 解压，缓存于
+`<data_dir>/templates/<id>/`（带 `template.json` 标记避免重复拉取）。模板选择通过
+`GET /api/studio/templates` 暴露，`POST /api/studio/templates/:id/pull` 可随时补齐。
+
+创建时由后端写入扩展脚手架：
 
 ```text
 <studio_data>/drafts/<draft_id>/
@@ -196,6 +205,8 @@ AI 用工具自测并确认通过后，会话空闲时系统自动运行机械�
   "id": "uuid",
   "extension_id": "WeatherExt",
   "name": "天气扩展",
+  "types": ["command"],
+  "template_id": "Default",
   "owner_id": "admin-user-id",
   "status": "checking",
   "session_id": "ses_xxx",
@@ -328,6 +339,9 @@ Studio Server 维护一条到 OpenCode `/event` 的 SSE 连接，按 `sessionID`
 | `POST` | `/api/studio/prompts/{name}/activate` | 启用指定提示词版本（可回滚） |
 | `GET` | `/api/studio/validation/steps` | 校验流水线步骤配置（启停、排序） |
 | `PATCH` | `/api/studio/validation/steps` | 更新校验步骤编排 |
+| `GET` | `/api/studio/templates` | 开发模板列表（Default / minimal 及安装状态） |
+| `GET` | `/api/studio/templates/{id}` | 获取单个开发模板信息 |
+| `POST` | `/api/studio/templates/{id}/pull` | 拉取/补齐扩展模板（后台未就绪时重试） |
 | `WS` | `/api/studio/events` | 当前管理员可访问草稿的实时事件 |
 
 后端到 OpenCode 的主要映射：
@@ -716,6 +730,7 @@ server/src/
     ├── events.ts
     ├── validation.ts
     ├── test_tools.ts # 测试工具后端实现：插件回调（部署/加载/日志/测试）
+    ├── templates.ts # 开发模板注册表：拉取/缓存扩展模板、克隆进草稿、清单重写
     ├── publishing.ts
     ├── prompts.ts
     ├── config.ts      # 平台配置与功能开关（features.json 等）
@@ -730,6 +745,7 @@ server/src/
 - `events.ts`：SSE 消费、事件归一化和 WebSocket 广播
 - `validation.ts`：校验流水线编排与结构化结果（步骤可配置，子进程调用 UniBot 校验脚本）
 - `test_tools.ts`：OpenCode 插件测试工具的后端实现——草稿部署/移除到测试环境、加载与绑定诊断、日志读取、测试运行（受 5.2 路径校验与 8.2 子进程约束）
+- `templates.ts`：开发模板注册表——扩展模板（Default）的 GitHub 拉取/缓存、克隆进草稿、Extension.toml 清单重写；`minimal` 为内置最小脚手架回退
 - `publishing.ts`：校验通过后的原子发布（本地目录 / UniBot API）
 - `prompts.ts`：提示词模板管理：版本化、编辑、预览、启用与回滚
 - `config.ts`：平台配置读写与校验（功能开关、默认模型、Agent 配置）
@@ -845,7 +861,7 @@ server/src/
 ### 后续版本
 
 - 基于已发布扩展创建可回滚的升级草稿
-- 支持 renderer、template、resources 类型的专用脚手架和预览
+- 以模板为基础创建草稿的「扫描模板」能力已落地（见 3.1 开发模板扩展）；renderer/template/resources 类型的**专属可视化预览与完整配置编辑**仍属后续
 - 从校验通过的草稿生成 Release zip、SHA-256 和市场元数据草案
 - GitHub 仓库创建与 PR 工作流，但始终保持人工确认
 - Linux rootless 容器执行环境

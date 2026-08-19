@@ -252,6 +252,7 @@ export function ensureDataDirs() {
     join(config.data_dir, 'logs'),
     join(config.data_dir, 'opencode'),
     join(config.data_dir, 'config'),
+    join(config.data_dir, 'templates'),
     config.unibot_env.test_dir,
   ]) {
     mkdirSync(dir, { recursive: true });

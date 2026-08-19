@@ -21,9 +21,11 @@ import {
   mkdirSync,
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { config } from './config';
 import { assertDiskSpace } from './disk';
 import { logger } from './logger';
+import { cloneTemplateSource, getTemplate } from './templates';
 import type { DraftMeta, ExtensionType } from './types';
 
 const MANIFEST_SCAFFOLD = `[manifest]
@@ -174,6 +176,88 @@ export function listDrafts(): DraftMeta[] {
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 
+/** 用用户的 id/name/description/types 重写一份 Extension.toml（最小脚手架用） */
+function renderManifest(opts: {
+  extensionId: string;
+  name: string;
+  description: string;
+  types: ExtensionType[];
+}): string {
+  const typesStr = opts.types.map((t) => `"${t}"`).join(', ');
+  return MANIFEST_SCAFFOLD
+    .replaceAll('{{extension_id}}', opts.extensionId)
+    .replaceAll('{{name}}', opts.name)
+    .replaceAll('{{description}}', opts.description)
+    .replaceAll('{{types}}', typesStr);
+}
+
+/** 写入最小代码入口与占位测试（新草稿/模板克隆的代码基础，AI 会在此基础上实现） */
+function writeCodeScaffold(workspace: string, name: string) {
+  writeFileSync(join(workspace, '__init__.py'), INIT_SCAFFOLD.replaceAll('{{name}}', name), 'utf-8');
+  mkdirSync(join(workspace, 'tests'), { recursive: true });
+  writeFileSync(
+    join(workspace, 'tests', 'test_extension.py'),
+    TEST_SCAFFOLD.replaceAll('{{name}}', name),
+    'utf-8',
+  );
+}
+
+/**
+ * 从开发模板生成草稿脚手架。
+ * - template 为 `minimal`（或省略）：写入内置最小脚手架（清单 + 入口 + 占位测试）；
+ * - template 为 `Default` 等扩展模板：克隆模板源码到工作区，并用用户的
+ *   id/名称/描述/类型重写 Extension.toml，再补齐代码入口与占位测试，AI 在此基础上改写。
+ */
+export function scaffoldDraftWorkspace(
+  workspace: string,
+  opts: { extensionId: string; name: string; description: string; types: ExtensionType[] },
+  templateId: string | null | undefined,
+): void {
+  if (templateId && templateId !== 'minimal') {
+    cloneTemplateSource(templateId, workspace);
+    rewriteClonedManifest(workspace, opts);
+    logger.info('draft', '从扩展模板创建脚手架', {
+      template: templateId,
+      extension_id: opts.extensionId,
+    });
+  } else {
+    writeFileSync(join(workspace, 'Extension.toml'), renderManifest(opts), 'utf-8');
+  }
+  // 无论何种模板，都补齐代码入口与占位测试，AI 在此基础上继续实现
+  writeCodeScaffold(workspace, opts.name);
+}
+
+/** 重写已克隆模板的 Extension.toml：id/name/description/types（解析→改动→序列化） */
+export function rewriteClonedManifest(
+  workspace: string,
+  opts: { extensionId: string; name: string; description: string; types: ExtensionType[] },
+): void {
+  const tomlFile = join(workspace, 'Extension.toml');
+  let text: string;
+  try {
+    const doc = parseToml(readFileSync(tomlFile, 'utf-8')) as Record<string, unknown>;
+    const extension = (doc.extension ?? {}) as Record<string, unknown>;
+    doc.extension = {
+      ...extension,
+      id: opts.extensionId,
+      name: opts.name,
+      description: opts.description,
+      types: opts.types,
+      version: '0.1.0',
+      author: 'Studio',
+    };
+    text = stringifyToml(doc);
+  } catch (cause) {
+    // 模板清单无法解析时（异常模板），回退为最小清单，避免卡死创建流程
+    logger.warn('draft', '模板清单解析失败，回退为最小清单', {
+      extension_id: opts.extensionId,
+      error: (cause as Error).message,
+    });
+    text = renderManifest(opts);
+  }
+  writeFileSync(tomlFile, text, 'utf-8');
+}
+
 /** 创建草稿 + 脚手架（对应 Plan.md 3.1） */
 export function createDraft(input: {
   extension_id: string;
@@ -182,6 +266,8 @@ export function createDraft(input: {
   types: ExtensionType[];
   model: DraftMeta['model'];
   agent: string;
+  /** 开发模板：minimal / Default 等；省略或 minimal 走内置最小脚手架 */
+  template_id?: string | null;
 }): DraftMeta {
   const existing = listDrafts();
   const extensionId = validateExtensionId(input.extension_id, existing);
@@ -189,27 +275,11 @@ export function createDraft(input: {
   assertDiskSpace(config.data_dir, '创建草稿');
   const draftId = randomUUID();
   const workspace = join(draftWorkspace(draftId), extensionId);
-  mkdirSync(join(workspace, 'tests'), { recursive: true });
-
-  const typesStr = input.types.map((t) => `"${t}"`).join(', ');
-  writeFileSync(
-    join(workspace, 'Extension.toml'),
-    MANIFEST_SCAFFOLD
-      .replaceAll('{{extension_id}}', extensionId)
-      .replaceAll('{{name}}', input.name)
-      .replaceAll('{{description}}', input.description)
-      .replaceAll('{{types}}', typesStr),
-    'utf-8',
-  );
-  writeFileSync(
-    join(workspace, '__init__.py'),
-    INIT_SCAFFOLD.replaceAll('{{name}}', input.name),
-    'utf-8',
-  );
-  writeFileSync(
-    join(workspace, 'tests', 'test_extension.py'),
-    TEST_SCAFFOLD.replaceAll('{{name}}', input.name),
-    'utf-8',
+  mkdirSync(workspace, { recursive: true });
+  scaffoldDraftWorkspace(
+    workspace,
+    { extensionId, name: input.name, description: input.description, types: input.types },
+    input.template_id,
   );
 
   // 初始化 git 仓库：OpenCode 快照/回退依赖 git 项目检测（见 ensureGitWorkspace）
@@ -222,6 +292,7 @@ export function createDraft(input: {
     name: input.name,
     description: input.description,
     types: input.types,
+    template_id: input.template_id && input.template_id !== 'minimal' ? input.template_id : null,
     owner_id: 'admin',
     status: 'draft',
     phase: 'planning',

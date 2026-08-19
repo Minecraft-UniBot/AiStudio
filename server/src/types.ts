@@ -67,6 +67,8 @@ export interface DraftMeta {
   name: string;
   description: string;
   types: ExtensionType[];
+  /** 创建时所选的开发模板（minimal / Default 等）；用于可重复性与展示 */
+  template_id?: string | null;
   owner_id: string;
   status: DraftStatus;
   /**

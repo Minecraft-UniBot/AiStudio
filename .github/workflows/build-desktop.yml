@@ -4,7 +4,9 @@
 #   macOS ARM64 : production-macos-arm64-UniBotExtensionStudio.app.tar.zst （内含 .app）
 #   Windows x64 : production-win-x64-UniBotExtensionStudio.tar.zst（含主程序 exe）
 #   Linux x64   : production-linux-x64-UniBotExtensionStudio.tar.zst（含可执行文件）
-# 上传 / Release 只保留这三个 app 归档，不发布安装包（.dmg / *-Setup.zip / *-Setup.tar.gz）。
+# 上传 / Release 只保留这三个 production 渠道的 app 归档（原样 `.tar.zst`，不打包成 zip，
+# 也不发布 `stable-` 别名归档——它是 Electrobun 1.x 兼容用的，每平台保留一套即可）。
+# 不发布安装包（.dmg / *-Setup.zip / *-Setup.tar.gz）。
 #
 # 触发方式：
 #   1. 手动触发（workflow_dispatch）—— 只构建并上传 artifacts
@@ -163,16 +165,17 @@ jobs:
         shell: bash
         run: |
           ls -la desktop/artifacts/
-          # 只校验自包含 app 归档（各平台均为 .tar.zst）；安装包不作为交付物
-          test -n "$(ls desktop/artifacts/ | grep -E '\.tar\.zst$')"
+          # 只校验 production 渠道的自包含 app 归档（macOS .app.tar.zst / Windows / Linux .tar.zst）
+          test -n "$(ls desktop/artifacts/ | grep -E '^production-.*\.tar\.zst$')"
 
-      # 只上传自包含 app 归档（macOS .app.tar.zst / Windows / Linux .tar.zst），
-      # 排除安装包（.dmg / *-Setup.zip / *-Setup.tar.gz）与更新元数据。
+      # 只上传 production 渠道的自包含 app 归档（*.tar.zst，原样直传、不打包成 zip）。
+      # production 构建同时会产出 stable-<os>-<arch>- 别名归档（Electrobun 1.x 兼容），
+      # 这里用 ^production- 排除，只保留一套；也排除安装包（.dmg / *-Setup.zip / *-Setup.tar.gz）。
       - name: Upload app artifacts
         uses: actions/upload-artifact@v4
         with:
           name: app-${{ matrix.name }}
-          path: desktop/artifacts/*.tar.zst
+          path: desktop/artifacts/production-*.tar.zst
           if-no-files-found: error
 
   release:

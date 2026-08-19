@@ -26,6 +26,8 @@ export const useStudioStore = defineStore('studio', () => {
   const todo = ref([])
   const options = ref({ providers: [], agents: [], test_tools_enabled: true })
   const optionsError = ref('')
+  const templates = ref([])
+  const templatesError = ref('')
   const connected = ref(false)
   const error = ref('')
   const pendingPermissions = ref([])
@@ -48,6 +50,23 @@ export const useStudioStore = defineStore('studio', () => {
       // OpenCode 不可用/获取失败时保留提示，前端不再静默显示空模型列表
       optionsError.value = e.message || '获取模型列表失败'
     }
+  }
+
+  // ---- 开发模板 ----
+  async function fetchTemplates() {
+    try {
+      templates.value = await api('/templates')
+      templatesError.value = ''
+    } catch (e) {
+      templatesError.value = e.message || '获取开发模板失败'
+    }
+    return templates.value
+  }
+
+  /** 触发拉取指定开发模板（Default 等），返回刷新后的模板列表 */
+  async function pullTemplate(templateId) {
+    await api(`/templates/${encodeURIComponent(templateId)}/pull`, { method: 'POST' })
+    return fetchTemplates()
   }
 
   // ---- 草稿 ----
@@ -272,6 +291,8 @@ export const useStudioStore = defineStore('studio', () => {
     todo,
     options,
     optionsError,
+    templates,
+    templatesError,
     connected,
     error,
     pendingPermissions,
@@ -279,6 +300,8 @@ export const useStudioStore = defineStore('studio', () => {
     opencodeAvailable,
     fetchStatus,
     fetchOptions,
+    fetchTemplates,
+    pullTemplate,
     fetchDrafts,
     createDraft,
     fetchDraft,

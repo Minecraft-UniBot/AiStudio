@@ -26,6 +26,7 @@ onMounted(async () => {
     await store.fetchStatus()
     await store.fetchDrafts()
     await store.fetchOptions()
+    await store.fetchTemplates()
     // status 拉取后再判断：未配置则弹出引导（仅本次登录首次，用户可「稍后再说」）
     if (store.status && store.status.unibot_configured === false) {
       dirSetupOpen.value = true

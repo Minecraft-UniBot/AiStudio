@@ -1,6 +1,6 @@
 <script setup>
-// 新建扩展草稿对话框（Plan 3.1：ID / 名称 / 描述 / 类型 / 模型 / Agent）
-import { ref, computed } from 'vue'
+// 新建扩展草稿对话框（Plan 3.1：ID / 名称 / 描述 / 类型 / 模型 / Agent / 模板）
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useStudioStore } from '@/stores/studio'
@@ -15,18 +15,66 @@ const open = defineModel({ type: Boolean, default: false })
 
 const router = useRouter()
 const store = useStudioStore()
-const { error: toast_error } = use_toast()
+const { success: toast_success, error: toast_error } = use_toast()
 
 const creating = ref(false)
+const pulling = ref(false)
 const form = ref({
   extension_id: '',
   name: '',
   description: '',
   types: ['command'],
+  template_id: 'Default',
   provider_id: '',
   model_id: '',
   agent: 'build',
 })
+
+// 打开对话框时刷新模板列表（Default 模板可能在启动后仍在后台拉取）
+watch(open, (val) => {
+  if (val) store.fetchTemplates().catch(() => {})
+})
+
+// 模板选项：内置 minimal（最小脚手架）+ 已拉取的扩展模板（如 Default）
+const templateOptions = computed(() => {
+  const list = store.templates
+  const options = []
+  for (const t of list) {
+    options.push({
+      value: t.id,
+      label: t.name,
+      description: t.kind === 'minimal' ? '内置最小脚手架（API/Command）' : t.description,
+    })
+  }
+  return options
+})
+
+/** 当前所选是否为 extension 模板且尚未就绪 */
+const selectedTemplate = computed(() =>
+  store.templates.find((t) => t.id === form.value.template_id),
+)
+
+/** 模板选择提示文案 */
+const templateHint = computed(() => {
+  const t = selectedTemplate.value
+  if (!t) return ''
+  if (t.kind === 'minimal') return '内置最小脚手架：从空白清单 + 入口 + 占位测试开始，AI 直接实现'
+  return t.description
+})
+
+async function retryPullTemplate() {
+  if (!selectedTemplate.value) return
+  pulling.value = true
+  try {
+    const updated = await store.pullTemplate(selectedTemplate.value.id)
+    const ready = updated.find((t) => t.id === selectedTemplate.value.id)
+    if (ready?.installed) toast_success(`模板「${ready.name}」已就绪`)
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    pulling.value = false
+  }
+}
 
 const providerOptions = computed(() =>
   store.options.providers.map((p) => ({ value: p.provider_id, label: p.label })),
@@ -53,6 +101,7 @@ async function create() {
       name: form.value.name,
       description: form.value.description,
       types: form.value.types,
+      template_id: form.value.template_id,
       model:
         form.value.provider_id && form.value.model_id
           ? { provider_id: form.value.provider_id, model_id: form.value.model_id }
@@ -103,6 +152,22 @@ function toggleType(type) {
           placeholder="例如：新增 /weather 指令查询天气，可配置城市和语言"
         />
         <span class="form-hint">作为第一条需求上下文</span>
+      </div>
+      <div class="field">
+        <label class="form-label">开发模板</label>
+        <Select v-model="form.template_id" :options="templateOptions" placeholder="选择开发模板" />
+        <div v-if="templateOptions.length" class="form-hint">
+          {{ templateHint }}
+        </div>
+        <div v-if="selectedTemplate?.kind === 'extension' && !selectedTemplate.installed" class="form-hint danger">
+          <span>模板「{{ selectedTemplate.name }}」尚未就绪（启动时后台拉取中）。</span>
+          <button type="button" class="link" :disabled="pulling" @click="retryPullTemplate">
+            {{ pulling ? '拉取中…' : '立即拉取' }}
+          </button>
+        </div>
+        <span v-else-if="store.templatesError" class="form-hint danger">
+          {{ store.templatesError }}
+        </span>
       </div>
       <div class="field">
         <label class="form-label">扩展类型</label>
@@ -169,6 +234,21 @@ function toggleType(type) {
 
 .form-hint.danger {
   color: var(--danger);
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .type-group {

@@ -47,6 +47,7 @@ import {
   validateDraft,
 } from './test_tools';
 import { assertFeatureEnabled } from './registry';
+import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './templates';
 import type { DraftMeta } from './types';
 
 // ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效；签发/校验见 auth.ts） =====
@@ -212,6 +213,30 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
+  // ---- 开发模板（开发模板扩展，见 AGENT.md「后续版本」/templates.ts） ----
+  if (path === '/api/studio/templates' && req.method === 'GET') {
+    return json(listTemplates());
+  }
+
+  const templatePullMatch = path.match(/^\/api\/studio\/templates\/([^/]+)\/pull$/);
+  if (templatePullMatch && req.method === 'POST') {
+    const templateId = templatePullMatch[1]!;
+    try {
+      return json(await pullTemplate(templateId));
+    } catch (e) {
+      return errorJson(`模板拉取失败：${(e as Error).message}`, 1, 400);
+    }
+  }
+
+  const templateMatch = path.match(/^\/api\/studio\/templates\/([^/]+)$/);
+  if (templateMatch && req.method === 'GET') {
+    try {
+      return json(getTemplate(templateMatch[1]!));
+    } catch (e) {
+      return errorJson((e as Error).message, 404, 404);
+    }
+  }
+
   // ---- 草稿 ----
   if (path === '/api/studio/drafts' && req.method === 'GET') {
     return json(listDrafts());
@@ -226,9 +251,18 @@ async function handleRequest(req: Request): Promise<Response> {
         types?: string[];
         model?: { provider_id?: string; model_id?: string } | null;
         agent?: string;
+        template_id?: string | null;
       };
       if (!body.extension_id || !body.name || !body.description) {
         return errorJson('缺少必填字段（extension_id / name / description）');
+      }
+      // 校验所选模板存在且可实例化（minimal 恒可用；extension 模板必须已安装）
+      const templateId = body.template_id && body.template_id !== 'minimal' ? body.template_id : null;
+      if (templateId) {
+        const info = getTemplate(templateId);
+        if (info.kind === 'extension' && !info.installed) {
+          return errorJson(`模板「${templateId}」尚未就绪，请稍后重试或先拉取该模板`, 1, 400);
+        }
       }
       // 全局并发限制（Plan 8.2）：同一管理员同时最多一个规划/编码任务
       const active = listDrafts().filter((d) =>
@@ -251,6 +285,7 @@ async function handleRequest(req: Request): Promise<Response> {
           ? { provider_id: body.model.provider_id, model_id: body.model.model_id }
           : null,
         agent: body.agent ?? config.defaults.agent,
+        template_id: templateId,
       });
 
       // 创建 OpenCode session 并进入「规划」阶段
@@ -869,6 +904,9 @@ const server = Bun.serve({
 
 ensureDataDirs();
 await opencode.start();
+
+// 初始化开发模板（后台拉取 Default 模板，不阻塞启动；见 templates.ts ensureTemplatesInit）
+ensureTemplatesInit();
 
 // 后台拉取 UniBot 测试环境（不阻塞启动：可能耗时数分钟；状态通过
 // /api/studio/unibot-env 查询，完成后广播 unibot-env.updated）

@@ -116,7 +116,8 @@ XDG_CONFIG_HOME="<DATA_DIR>/opencode/config" opencode auth login   # macOS/Linux
 - **`build` job**（Electrobun 原生窗口应用）：矩阵 `macos-14`(arm64) / `windows-latest`(x64) /
   `ubuntu-24.04`(x64)，Linux ARM64 在注释中预留；步骤：装 Bun → 装 Hutch（缓存 `~/.hutch`）→
   安装依赖 → 后端测试 → 构建前端 → 下载 opencode → stage → `hutch electrobun build --env=production`
-  → 上传**仅 app 归档**（`desktop/artifacts/*.tar.zst`，排除 `.dmg` 与 `*Setup*` 安装包）
+  → 上传**仅 production 渠道的 app 归档** `desktop/artifacts/production-*.tar.zst`
+  （原样 `.tar.zst` 直传、不打包成 zip；不带上 `stable-` 别名归档，也排除 `.dmg` 与 `*Setup*` 安装包）
 - **`release` job**：合并三平台 `build` 上传的 app 归档到 Release 草稿
 
 > macOS 正式分发如需通过 Gatekeeper，需在 `electrobun.config.ts` 开启
