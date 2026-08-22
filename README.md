@@ -38,8 +38,7 @@ Studio/
 │       └── utils/               # api 封装、状态映射
 ├── release/                     # 单文件可执行版打包（见下方「单文件可执行版」）
 │   ├── src/main.ts              # 可执行入口：解压内置资源 → 启动服务器 → 打开浏览器
-│   ├── build.ts                 # 一键打包脚本（bun build --compile --asset）
-│   └── scripts/fetch-opencode.ts# 下载内置 opencode
+│   └── build.ts                 # 一键打包脚本（bun build --compile --asset）
 └── Install.sh
 ```
 
@@ -61,16 +60,17 @@ cd web && bun run dev
 
 ## 单文件可执行版
 
-`release/` 把「后端 + 前端 + 内置资源 + 内置 opencode」打包成**一个自包含可执行文件**：
-内置 opencode（无需用户单独安装），运行即自动初始化并启动服务器（REST / WebSocket /
-前端页面同源），并自动打开浏览器，无需任何其他操作。
+`release/` 把「后端 + 前端 + 内置资源」打包成**一个自包含可执行文件**：
+运行即自动初始化并启动服务器（REST / WebSocket / 前端页面同源），并自动打开浏览器，
+无需任何其他操作。opencode 不内置（减小安装包体积）：**首次启动时自动下载**
+到数据目录（`~/.unibot-studio/opencode-bin/`，约 45MB，带版本标记复用），用户无需安装。
 
 ```bash
 bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 release/artifacts/）
 ```
 
-- 打包内容：server bundle + `web/dist` + `prompts/skills/validation/plugins` + 内置 opencode 二进制
-- 运行行为：首次运行把内置资源解压到数据目录（`~/.unibot-studio/resources`，带版本标记自动更新），
+- 打包内容：server bundle + `web/dist` + `prompts/skills/validation/plugins`（opencode 首次启动自动下载）
+- 运行行为：首次运行解压内置资源（`~/.unibot-studio/resources`，带版本标记自动更新）并下载 opencode，
   默认端口 9876 被占用时自动换空闲端口，启动后打印访问地址与口令并打开浏览器
 - 命令行：`--version` / `--help`；环境变量同下方「配置」表（另有 `UNIBOT_STUDIO_NO_BROWSER=1` 关闭自动开浏览器）
 - 发布工作流：`.github/workflows/release.yml`（手动触发，或推送 tag `v*` 自动构建并创建 Release 草稿），

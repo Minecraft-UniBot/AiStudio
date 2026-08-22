@@ -52,7 +52,8 @@ function loadConfig(): StudioConfig {
     static_dir: process.env.UNIBOT_STUDIO_STATIC_DIR ?? '',
     opencode: {
       bin: process.env.OPENCODE_BIN ?? 'opencode',
-      // 与 server/package.json 的 @opencode-ai/sdk 版本一致；桌面客户端随包内置该版本二进制
+      // 与 server/package.json 的 @opencode-ai/sdk 版本一致；
+      // 单文件版首次启动时按此版本自动下载（见 opencode_download.ts）
       version: '1.18.18',
       data_dir: join(dataDir, 'opencode'),
       // LLM 请求超时（毫秒）：注入 opencode provider options.timeout / chunkTimeout。

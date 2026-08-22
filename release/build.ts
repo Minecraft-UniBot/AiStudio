@@ -2,14 +2,15 @@
 /**
  * 一键打包脚本：构建 UniBot Extension Studio 单文件可执行版。
  *
- * 产物：一个自包含二进制（含后端、前端、prompts/skills/validation/plugins、内置 opencode），
+ * 产物：一个自包含二进制（含后端、前端、prompts/skills/validation/plugins），
  * 运行即启动服务器，无需安装任何依赖（详见 release/README.md）。
+ * opencode 不内置：首次启动时由后端自动下载到数据目录（减小安装包体积，
+ * 见 server/src/opencode_download.ts）。
  *
  * 用法：
  *   bun release/build.ts [选项]
  *     --outdir <dir>        产物输出目录（默认 release/artifacts）
  *     --name <name>         产物文件名（默认 unibot-studio，Windows 自动加 .exe）
- *     --skip-opencode       不下载内置 opencode（产物回退使用 PATH 中的 opencode）
  *     --force-web           总是重新构建前端（默认 dist 比源码新则跳过）
  *     --frozen              安装依赖时使用 --frozen-lockfile（CI 用）
  *
@@ -25,7 +26,6 @@ const RELEASE_DIR = import.meta.dir; // release/
 const REPO_ROOT = dirname(RELEASE_DIR); // Studio/
 const SERVER_DIR = join(REPO_ROOT, "server");
 const WEB_DIR = join(REPO_ROOT, "web");
-const OPENCODE_VERSION = process.env.OPENCODE_VERSION ?? "1.18.18";
 
 // ---- 参数解析 ----
 const args = process.argv.slice(2);
@@ -38,7 +38,6 @@ function flagValue(name: string): string | undefined {
 }
 const OUTDIR = resolve(flagValue("--outdir") ?? join(RELEASE_DIR, "artifacts"));
 let NAME = flagValue("--name") ?? "unibot-studio";
-const SKIP_OPENCODE = flag("--skip-opencode");
 const FORCE_WEB = flag("--force-web");
 const FROZEN = flag("--frozen");
 
@@ -142,18 +141,7 @@ run(
   REPO_ROOT,
 );
 
-// ---- 4. 内置 opencode（可选，但强烈建议生产包含） ----
-const vendorOpen = join(RELEASE_DIR, "vendor", "opencode");
-const opencodeBin = join(vendorOpen, process.platform === "win32" ? "opencode.exe" : "opencode");
-if (!SKIP_OPENCODE && !existsSync(opencodeBin)) {
-  console.log(`==> 下载内置 opencode v${OPENCODE_VERSION} …`);
-  run(bunExecutable(), ["release/scripts/fetch-opencode.ts", `--version=${OPENCODE_VERSION}`], REPO_ROOT);
-}
-if (!existsSync(opencodeBin)) {
-  console.warn("⚠ 未找到内置 opencode，产物将回退使用 PATH 中的 opencode（用户需自行安装）");
-}
-
-// ---- 5. 写版本号 ----
+// ---- 4. 写版本号 ----
 const version = resolveVersion();
 const versionFile = join(RELEASE_DIR, "src", "version.generated.ts");
 const versionContent = `/**\n * 构建时生成的版本号（由 release/build.ts 写入）。\n * 默认值随仓库提交，打包时自动替换为 tag / 环境变量指定的版本。\n */\nexport const APP_VERSION = '${version}';\n`;
@@ -162,7 +150,7 @@ if (!existsSync(versionFile) || readFileSyncSafe(versionFile) !== versionContent
   console.log(`==> 版本号：${version}`);
 }
 
-// ---- 6. 编译单文件可执行版 ----
+// ---- 5. 编译单文件可执行版 ----
 mkdirSync(OUTDIR, { recursive: true });
 const outfile = join(OUTDIR, process.platform === "win32" && !NAME.endsWith(".exe") ? `${NAME}.exe` : NAME);
 rmSync(outfile, { force: true });
@@ -174,7 +162,6 @@ const assets: string[] = [
   "server/plugins",
   "web/dist",
 ];
-if (existsSync(vendorOpen)) assets.push("release/vendor/opencode");
 if (existsSync(join(RELEASE_DIR, "vendor", "plugin"))) assets.push("release/vendor/plugin");
 
 const buildArgs = [

@@ -30,6 +30,7 @@ import { createServer as createTcpServer } from 'node:net';
 import { join } from 'node:path';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
 import { config, resSrcDir } from './config';
+import { ensureOpencodeBin } from './opencode_download';
 import { issueToken } from './auth';
 import { logger } from './logger';
 
@@ -245,8 +246,23 @@ class OpenCodeGateway {
   /** 启动 OpenCode 子进程并等待健康 */
   async start(): Promise<OpenCodeStatus> {
     this.stopping = false;
+    await this.ensureBinary();
     await this.launch();
     return this.status;
+  }
+
+  /**
+   * 确保 opencode 可执行文件可用（首次启动自动下载到数据目录，见 opencode_download.ts）。
+   * 下载失败不致命：服务器照常启动，opencode 标记为不可用（UI 可见诊断）。
+   */
+  private async ensureBinary(): Promise<void> {
+    try {
+      config.opencode.bin = await ensureOpencodeBin();
+    } catch (e) {
+      logger.error('opencode', '获取 opencode 失败（可稍后重试，或设置 OPENCODE_BIN / 手动安装 opencode）', {
+        error: (e as Error).message,
+      });
+    }
   }
 
   /**

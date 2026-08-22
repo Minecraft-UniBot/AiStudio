@@ -3,22 +3,21 @@
  * UniBot Extension Studio —— 单文件可执行版入口。
  *
  * 一个二进制 = 后端（server 全部源码与依赖）+ 前端（web/dist）+ 内置资源
- * （prompts / skills / validation / plugins）+ 内置 opencode。运行即
- * 「初始化 + 启动服务器」，不需要用户做任何额外操作：
+ * （prompts / skills / validation / plugins）。opencode 不内置（减小体积）：
+ * 首次启动时由后端自动下载到 <数据目录>/opencode-bin/（见 server/src/opencode_download.ts）。
+ * 运行即「初始化 + 启动服务器」，不需要用户做任何额外操作：
  *
  *   1. 解析数据目录（UNIBOT_STUDIO_DATA_DIR ?? ~/.unibot-studio）
  *   2. 默认端口 9876 被占用时自动改换空闲端口（也可用 UNIBOT_STUDIO_PORT 指定）
  *   3. 把内置资源解压到 <数据目录>/resources（带版本标记，升级后自动重新解压）
- *   4. 用 UNIBOT_STUDIO_RES_DIR / UNIBOT_STUDIO_STATIC_DIR / OPENCODE_BIN
- *      把后端、静态页与 opencode 指向解压产物
+ *   4. 用 UNIBOT_STUDIO_RES_DIR / UNIBOT_STUDIO_STATIC_DIR 把后端与静态页指向解压产物
  *   5. 在同一进程内启动后端（REST / WebSocket / 前端静态页全部同源）
  *   6. 打印访问地址与口令，并自动打开浏览器
  *
  * 资源嵌入方式：bun build --compile --asset=<目录>（Bun >= 1.4 的 compile.assets），
  * 运行时位于 import.meta.dir 下的原始相对路径，可用 node:fs 读取。因为
- * validation 脚本要交给 python 子进程、opencode 要作为可执行文件 spawn，
- * 必须先解压到真实文件系统，再让后端通过环境变量引用（见 server/src/config.ts
- * 对 UNIBOT_STUDIO_RES_DIR 的说明）。
+ * validation 脚本要交给 python 子进程，必须先解压到真实文件系统，再让后端
+ * 通过环境变量引用（见 server/src/config.ts 对 UNIBOT_STUDIO_RES_DIR 的说明）。
  *
  * 注意：本文件不能在模块顶层 import 任何 server 模块——env 必须在
  * 动态 import server 入口（../../server/src/index.ts）之前设置完毕，
@@ -28,7 +27,6 @@ import { homedir } from 'node:os';
 import { createServer as createTcpServer } from 'node:net';
 import { spawn } from 'node:child_process';
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -211,7 +209,6 @@ async function main(): Promise<void> {
           ['plugins', join('server', 'plugins')],
           ['plugin', join('server', 'plugins')], // 预打包的 unibot-tools.js（与源码同目录，后端优先用预打包产物）
           ['dist', 'web'],
-          ['opencode', 'opencode'],
         ];
         let any = false;
         for (const [srcRel, destRel] of embedded) {
@@ -223,7 +220,7 @@ async function main(): Promise<void> {
         if (!any) warn('未找到内置资源（可能未用 --asset 打包），部分功能可能不可用');
       }
     } catch (e) {
-      // 解压失败不致命：后端可能仍可用（如仅缺 opencode 时回退 PATH）
+      // 解压失败不致命：后端仍可能可用
       warn(`内置资源解压失败：${(e as Error).message}`);
     }
 
@@ -233,19 +230,8 @@ async function main(): Promise<void> {
     mkdirSync(serverSrcDir, { recursive: true });
     process.env.UNIBOT_STUDIO_RES_DIR = serverSrcDir;
     process.env.UNIBOT_STUDIO_STATIC_DIR = join(resourcesDir, 'web');
-
-    const opencodeBin = join(
-      resourcesDir,
-      'opencode',
-      process.platform === 'win32' ? 'opencode.exe' : 'opencode',
-    );
-    if (existsSync(opencodeBin)) {
-      // 解压写出的文件权限为 0644，opencode 需要可执行位（Windows 无此概念）
-      if (process.platform !== 'win32') chmodSync(opencodeBin, 0o755);
-      process.env.OPENCODE_BIN = opencodeBin;
-    } else if (!process.env.OPENCODE_BIN) {
-      warn('未找到内置 opencode，将回退使用 PATH 中的 opencode（若已安装）');
-    }
+    // opencode 不再内置：首次启动时由后端自动下载到 <数据目录>/opencode-bin/（见
+    // server/src/opencode_download.ts），这里不注入 OPENCODE_BIN。
   }
 
   // ---- 4. 把日志同时落盘（<数据目录>/logs/studio.log），双击运行也能事后排查 ----
