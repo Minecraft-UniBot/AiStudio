@@ -10,7 +10,7 @@ import { ensureDataDirs, saveConfig, setUnibotDir, docsAllowlist, marketAllowlis
 import { config } from './config';
 import { issueToken, verifyToken } from './auth';
 import { opencode, resolvePermissionTarget, normalizeProviders } from './opencode';
-import { logger } from './logger';
+import { enableFileLogging, logger } from './logger';
 import { trackSession, untrackDraft } from './sessions';
 import {
   assertPromptable,
@@ -895,19 +895,36 @@ const server = Bun.serve({
       }
       const upgraded = server.upgrade(req);
       if (!upgraded) return Response.json({ code: 500, data: null, message: '升级失败' }, { status: 500 });
+      logger.debug('ws', 'WebSocket 连接升级', { path: url.pathname });
       return undefined;
     }
     const start = Date.now();
     // 静态资源优先于 API 路由（登录页等前端资源无需认证）
+    let res: Response | null = null;
+    let isStatic = false;
     if (config.static_dir) {
-      const staticRes = serveStatic(req, url);
-      if (staticRes) return staticRes;
+      res = serveStatic(req, url);
+      if (res) isStatic = true;
     }
-    const res = await handleRequest(req);
-    logger.info('http', `${req.method} ${url.pathname} -> ${res.status}`, {
-      ms: Date.now() - start,
-      query: url.search || undefined,
-    });
+    if (!res) res = await handleRequest(req);
+    const ms = Date.now() - start;
+    // 访问日志分级：静态资源归 debug（避免每次页面加载刷屏），API 按状态码分级
+    // （4xx/5xx 高亮为 warn，错误一目了然），耗时与查询串作为结构化字段
+    if (isStatic) {
+      logger.debug('http', `${req.method} ${url.pathname}`, { status: res.status, ms });
+    } else if (res.status >= 400) {
+      logger.warn('http', `${req.method} ${url.pathname}`, {
+        status: res.status,
+        ms,
+        query: url.search || undefined,
+      });
+    } else {
+      logger.info('http', `${req.method} ${url.pathname}`, {
+        status: res.status,
+        ms,
+        query: url.search || undefined,
+      });
+    }
     return res;
   },
   websocket: {
@@ -927,6 +944,9 @@ const server = Bun.serve({
 });
 
 ensureDataDirs();
+// 日志同时落盘 <数据目录>/logs/studio.log（开发模式与单文件版一致；
+// 单文件版启动器自己的消息在 import 本模块前已写入同一文件，见 release/src/main.ts）
+const logFilePath = enableFileLogging();
 await opencode.start();
 
 // 初始化开发模板（后台拉取 Default 模板，不阻塞启动；见 templates.ts ensureTemplatesInit）
@@ -987,6 +1007,7 @@ const oc = opencode.getStatus();
 logger.info('server', 'Extension Studio 启动完成', {
   url: `http://${config.host}:${config.port}`,
   data_dir: config.data_dir,
+  log_file: logFilePath ?? 'off',
   unibot_dir: config.unibot_dir,
   opencode: oc.available ? `可用 v${oc.version}` : `不可用（${oc.error ?? '-'}）`,
 });

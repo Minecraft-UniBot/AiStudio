@@ -403,13 +403,24 @@ class OpenCodeGateway {
       data_dir: dataDir,
     });
 
-    this.process.stdout?.on('data', (d: Buffer) => {
-      if (process.env.UNIBOT_STUDIO_DEBUG) console.log('[opencode]', d.toString().trim());
-    });
-    this.process.stderr?.on('data', (d: Buffer) => {
-      const line = d.toString().trim();
-      if (process.env.UNIBOT_STUDIO_DEBUG) console.error('[opencode]', line);
-    });
+    // 子进程 stdout/stderr 按行转发到 logger.debug（UNIBOT_STUDIO_LOG_LEVEL=debug 时可见），
+    // 统一日志格式与级别过滤，替代原先的 UNIBOT_STUDIO_DEBUG + 裸 console 输出。
+    // 用缓冲区按换行切分，避免 chunk 边界把一行日志截成两半。
+    const pipeOutput = (stream: NodeJS.ReadableStream | null, scope: string) => {
+      if (!stream) return;
+      let buf = '';
+      stream.on('data', (d: Buffer) => {
+        buf += d.toString();
+        let idx: number;
+        while ((idx = buf.indexOf('\n')) !== -1) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (line) logger.debug(scope, line);
+        }
+      });
+    };
+    pipeOutput(this.process.stdout, 'opencode');
+    pipeOutput(this.process.stderr, 'opencode:stderr');
     this.process.on('exit', (code, signal) => {
       this.client = null;
       this.status.available = false;

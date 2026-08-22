@@ -90,8 +90,13 @@ bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 r
 | `UNIBOT_STUDIO_DATA_DIR` | 平台数据目录（默认 `~/.unibot-studio`） |
 | `UNIBOT_DIR` | UniBot 根目录（默认自动探测） |
 | `UNIBOT_STUDIO_PASSWORD` | 平台访问口令（覆盖自动生成） |
+| `UNIBOT_STUDIO_LOG_LEVEL` | 日志级别：`debug` / `info` / `warn` / `error`（默认 `info`） |
+| `UNIBOT_STUDIO_LOG_FILE` | 日志文件路径（默认 `<数据目录>/logs/studio.log`；设 `off` 关闭落盘） |
 | `OPENCODE_BIN` | opencode 可执行文件路径 |
 | `UNIBOT_STUDIO_NO_BROWSER` | 单文件版：设为 `1` 时启动后不自动打开浏览器 |
+
+日志同时输出到控制台（终端自动配色，`NO_COLOR` 可关闭，`UNIBOT_STUDIO_LOG_COLOR=1/0` 显式开关优先）
+与 `<数据目录>/logs/studio.log`（单行纯文本，无 ANSI，超 20MB 自动轮转为 `.log.1`）。
 
 ## 安全模型
 
