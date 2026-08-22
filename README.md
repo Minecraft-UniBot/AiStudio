@@ -36,6 +36,10 @@ Studio/
 │       ├── components/studio/   # MessagePart / PermissionRequest
 │       ├── stores/studio.js     # Pinia store
 │       └── utils/               # api 封装、状态映射
+├── release/                     # 单文件可执行版打包（见下方「单文件可执行版」）
+│   ├── src/main.ts              # 可执行入口：解压内置资源 → 启动服务器 → 打开浏览器
+│   ├── build.ts                 # 一键打包脚本（bun build --compile --asset）
+│   └── scripts/fetch-opencode.ts# 下载内置 opencode
 └── Install.sh
 ```
 
@@ -55,22 +59,24 @@ cd web && bun run dev
 
 浏览器访问 `http://localhost:9877`，使用平台访问口令登录（首次启动自动生成，保存在 `~/.unibot-studio/config/studio.json`，可用 `UNIBOT_STUDIO_PASSWORD` 环境变量覆盖）。
 
-## 桌面客户端（Electrobun）
+## 单文件可执行版
 
-`desktop/` 提供跨平台**原生窗口**桌面应用（macOS ARM64 / Windows x64 / Linux x64）：
-内置 opencode（无需用户单独安装），「后端 + 前端」一体，双击即打开工坊窗口。
+`release/` 把「后端 + 前端 + 内置资源 + 内置 opencode」打包成**一个自包含可执行文件**：
+内置 opencode（无需用户单独安装），运行即自动初始化并启动服务器（REST / WebSocket /
+前端页面同源），并自动打开浏览器，无需任何其他操作。
 
 ```bash
-cd desktop
-bun scripts/fetch-opencode.ts     # 下载内置 opencode（npm registry，约 45MB）
-bun run build:production          # 构建当前平台（产物在 desktop/artifacts/）
+bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 release/artifacts/）
 ```
 
-- 开发、配置与常见问题：见 [`desktop/README.md`](desktop/README.md)
-- 打包工作流：`.github/workflows/build-desktop.yml`（手动触发，或推送 tag `desktop-v*` 自动构建并创建 Release 草稿）
-- **交付物**：只发布三平台自包含的 **app 归档**（`*.tar.zst`，解压即点开即用，原生窗口），
-  不发布安装包（`.dmg` / `*-Setup.zip` / `*-Setup.tar.gz`）；Electrobun 无 macOS x64 核心，
-  Intel Mac 用 Web 版（`cd web && bun run dev`）
+- 打包内容：server bundle + `web/dist` + `prompts/skills/validation/plugins` + 内置 opencode 二进制
+- 运行行为：首次运行把内置资源解压到数据目录（`~/.unibot-studio/resources`，带版本标记自动更新），
+  默认端口 9876 被占用时自动换空闲端口，启动后打印访问地址与口令并打开浏览器
+- 命令行：`--version` / `--help`；环境变量同下方「配置」表（另有 `UNIBOT_STUDIO_NO_BROWSER=1` 关闭自动开浏览器）
+- 发布工作流：`.github/workflows/release.yml`（手动触发，或推送 tag `v*` 自动构建并创建 Release 草稿），
+  产物为各平台自包含可执行文件：`unibot-studio-{macos-arm64,macos-x64,windows-x64,linux-x64}[.exe]`
+
+开发模式仍走源码运行：`cd server && bun src/index.ts` + `cd web && bun run dev`。
 
 ## 配置
 
@@ -84,6 +90,7 @@ bun run build:production          # 构建当前平台（产物在 desktop/artif
 | `UNIBOT_DIR` | UniBot 根目录（默认自动探测） |
 | `UNIBOT_STUDIO_PASSWORD` | 平台访问口令（覆盖自动生成） |
 | `OPENCODE_BIN` | opencode 可执行文件路径 |
+| `UNIBOT_STUDIO_NO_BROWSER` | 单文件版：设为 `1` 时启动后不自动打开浏览器 |
 
 ## 安全模型
 

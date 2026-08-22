@@ -98,6 +98,18 @@ function loadConfig(): StudioConfig {
     auth: { ...base.auth, ...(disk.auth ?? {}) },
   };
 
+  // 环境变量优先级高于配置文件（文件头注释与 README「配置」表约定，单文件版依赖此行为）：
+  // 磁盘配置（含首次启动自动生成的 password/token 写盘时落下的整份配置）不能覆盖 env。
+  if (process.env.UNIBOT_STUDIO_HOST) merged.host = process.env.UNIBOT_STUDIO_HOST;
+  if (process.env.UNIBOT_STUDIO_PORT) merged.port = Number(process.env.UNIBOT_STUDIO_PORT);
+  if (process.env.UNIBOT_STUDIO_DATA_DIR) merged.data_dir = process.env.UNIBOT_STUDIO_DATA_DIR;
+  if (process.env.UNIBOT_STUDIO_STATIC_DIR) merged.static_dir = process.env.UNIBOT_STUDIO_STATIC_DIR;
+  if (process.env.OPENCODE_BIN) merged.opencode.bin = process.env.OPENCODE_BIN;
+  if (process.env.UNIBOT_DIR) {
+    merged.unibot_dir = process.env.UNIBOT_DIR;
+    merged.extensions_dir = join(process.env.UNIBOT_DIR, 'Extensions');
+  }
+
   // 口令：环境变量 > 已存配置 > 自动生成
   if (process.env.UNIBOT_STUDIO_PASSWORD) {
     merged.auth.password = process.env.UNIBOT_STUDIO_PASSWORD;

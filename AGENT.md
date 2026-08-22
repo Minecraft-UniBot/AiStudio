@@ -195,7 +195,7 @@ AI 用工具自测并确认通过后，会话空闲时系统自动运行机械�
 
 对**渲染包/模板扩展**草稿，工作台右栏提供「预览」Tab：后端用 Jinja2（复用 UniBot venv 内的
 jinja2 与受限子进程）把草稿 `Templates/` 下的某个模板渲染成完整 HTML（含 `Base.css` 与模板自身
-CSS，二者同为 Jinja2 一起渲染），前端用 `iframe srcdoc` 实时展示。预览内置占位测试数据
+CSS，二者同为 Jinja2 一起渲染），前端用 `iframe srcdoc` 实时展示，并按容器宽度用 CSS `transform: scale` 等比缩放（读 iframe 内容实际尺寸后补偿画布大小，超出部分由外层滚动）。预览内置占位测试数据
 （`Server / List / Luck / About / Bound / Help` 各模板的字段，见 `server/validation/preview_template.py`），
 文件变化后防抖重渲染，模板名可切换。实现：`server/src/preview.ts`（编排）+ `server/validation/preview_template.py`（渲染，含最小 Jinja 全局函数兜底，避免 `random`/`resource_url` 等报错）。仅渲染草稿工作区内的 `Templates` 目录，不写任何文件。
 

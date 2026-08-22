@@ -206,7 +206,7 @@ export interface StudioConfig {
   extensions_dir: string;
   host: string;
   port: number;
-  /** 前端静态资源目录（桌面客户端模式：由桌面主进程注入 web/dist 路径；为空则不提供静态服务） */
+  /** 前端静态资源目录（单文件可执行版：由 release/src/main.ts 解压内置 web/dist 后经 UNIBOT_STUDIO_STATIC_DIR 注入；为空则不提供静态服务） */
   static_dir: string;
   opencode: {
     bin: string;

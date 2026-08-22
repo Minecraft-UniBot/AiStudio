@@ -1,7 +1,0 @@
-{
-  "extends": "./.hutch/devkit/tsconfig.json",
-  "compilerOptions": {
-    "types": ["bun-types"]
-  },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "*.config.ts"]
-}

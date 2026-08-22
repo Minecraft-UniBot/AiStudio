@@ -25,7 +25,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, existsSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createTcpServer } from 'node:net';
 import { join } from 'node:path';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
@@ -254,14 +254,18 @@ class OpenCodeGateway {
    * opencode 全局插件目录 = <opencode data>/config/opencode/plugins/，
    * 目录内文件在启动时自动加载（ConfigPlugin.load 扫描 {plugin,plugins}/*.{ts,js}）。
    *
-   * 插件源码位于 server/plugins/，用 Bun.build 打包为自包含 JS（内联
-   * @opencode-ai/plugin 与 zod），避免运行时依赖 node_modules 解析。
+   * 插件源码位于 server/plugins/。两种打包方式：
+   * - 预打包（单文件可执行版）：release/build.ts 打包期已用 Bun.build 打成
+   *   自包含 unibot-tools.js（内联 @opencode-ai/plugin 与 zod），解压后与源码同目录。
+   *   运行时没有 node_modules，必须优先用它，否则 Bun.build 无法解析依赖。
+   * - 运行时打包（源码开发模式）：用 Bun.build 现打（内联依赖，避免依赖 node_modules 解析）。
    */
   private async syncPlugins(): Promise<void> {
     try {
       const pluginDir = join(config.opencode.data_dir, 'config', 'opencode', 'plugins');
       const source = join(resSrcDir(), '..', 'plugins', 'unibot-tools.ts');
-      if (!existsSync(source)) {
+      const prebuilt = join(resSrcDir(), '..', 'plugins', 'unibot-tools.js');
+      if (!existsSync(source) && !existsSync(prebuilt)) {
         logger.warn('opencode', '未找到测试工具插件源码，跳过插件注册', { source });
         return;
       }
@@ -269,6 +273,14 @@ class OpenCodeGateway {
       // 清理旧产物后重新打包，保证与当前源码一致（Bun.build 不覆盖同路径产物会报错）
       for (const name of readdirSync(pluginDir)) {
         if (name.startsWith('unibot-tools')) rmSync(join(pluginDir, name), { force: true });
+      }
+      if (existsSync(prebuilt)) {
+        copyFileSync(prebuilt, join(pluginDir, 'unibot-tools.js'));
+        logger.info('opencode', '测试工具插件已注册（预打包产物）', {
+          plugin: join(pluginDir, 'unibot-tools.js'),
+          size: statSync(prebuilt).size,
+        });
+        return;
       }
       const out = await Bun.build({
         entrypoints: [source],

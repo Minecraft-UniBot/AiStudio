@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# UniBot Extension Studio 一键安装脚本
+# UniBot Extension Studio 一键安装脚本（源码开发模式）
+# 想要免安装的单文件可执行版？见 README「单文件可执行版」（bun release/build.ts 打包，
+# 运行即启动服务器，无需本脚本）。
 set -euo pipefail
 
 STUDIO_DIR="$(cd "$(dirname "$0")" && pwd)"

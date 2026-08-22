@@ -848,8 +848,10 @@ async function ensureSession(
 
 // ===== 启动 =====
 /**
- * 静态资源服务（桌面客户端模式，对应 config.static_dir）：
+ * 静态资源服务（单文件可执行版 / 静态托管模式，对应 config.static_dir）：
  * - 前端构建产物由 Studio Server 同源提供，REST 与 WebSocket 走同一端口
+ * - 单文件可执行版由 release/src/main.ts 解压内置 web/dist 后通过
+ *   UNIBOT_STUDIO_STATIC_DIR 注入；开发模式不设 static_dir 时不提供静态服务
  * - SPA 回退：非 /api 且文件不存在的 GET 一律回退 index.html（支持 /workspace/:id 等前端路由）
  * - 路径穿越防护：规范化后必须仍位于 static_dir 之内
  */
@@ -979,8 +981,8 @@ for (const draft of listDrafts()) {
   }
 }
 
-await startEventConsumer();
-
+// 启动横幅放在 startEventConsumer 之前：它是无限循环（永不 resolve），
+// 放在 await 之后会导致「启动完成 / 访问口令」永远不打印。
 const oc = opencode.getStatus();
 logger.info('server', 'Extension Studio 启动完成', {
   url: `http://${config.host}:${config.port}`,
@@ -988,6 +990,13 @@ logger.info('server', 'Extension Studio 启动完成', {
   unibot_dir: config.unibot_dir,
   opencode: oc.available ? `可用 v${oc.version}` : `不可用（${oc.error ?? '-'}）`,
 });
+// 单文件可执行版"零配置"体验的关键一行：口令只在本机打印，
+// 方便双击运行的用户直接从终端复制登录（配置同时落盘 <data>/config/studio.json）
+logger.info('auth', `访问口令：${config.auth.password}（保存在 ${join(config.data_dir, 'config', 'studio.json')}）`);
+
+// 事件消费是无限循环（永不 resolve）：不能 await（会卡死模块顶层，
+// 使下方信号处理注册与单文件启动器的 import 返回都失效），后台运行即可。
+void startEventConsumer();
 
 // 优雅退出
 process.on('SIGINT', async () => {

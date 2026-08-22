@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * 下载并解压 opencode 可执行文件到 desktop/vendor/opencode/（桌面客户端“安装自带 opencode”）。
+ * 下载并解压 opencode 可执行文件到 release/vendor/opencode/（单文件版"内置 opencode"，用户无需另行安装）。
  *
  * 用法：
- *   bun scripts/fetch-opencode.ts [--version 1.18.18] [--force] [--source=npm|github]
+ *   bun release/scripts/fetch-opencode.ts [--version 1.18.18] [--force] [--source=npm|github]
  * 环境变量：OPENCODE_VERSION（默认 1.18.18，与 server 固定版本一致）
  *
  * 默认从 npm registry 获取平台二进制包（opencode-ai 的 optionalDependencies，
@@ -17,8 +17,8 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
-const DESKTOP_DIR = join(import.meta.dir, "..");
-const VENDOR_OPENCODE = join(DESKTOP_DIR, "vendor", "opencode");
+const RELEASE_DIR = join(import.meta.dir, ".."); // release/（本脚本位于 release/scripts/）
+const VENDOR_OPENCODE = join(RELEASE_DIR, "vendor", "opencode");
 const BIN_NAME = process.platform === "win32" ? "opencode.exe" : "opencode";
 const DEST = join(VENDOR_OPENCODE, BIN_NAME);
 
@@ -150,4 +150,4 @@ if (process.platform !== "win32") chmodSync(DEST, 0o755);
 
 rmSync(tmpDir, { recursive: true, force: true });
 console.log(`==> 内置 opencode 就绪：${DEST}`);
-console.log(`    （bun scripts/fetch-opencode.ts --force 可重下）`);
+console.log(`    （bun release/scripts/fetch-opencode.ts --force 可重下）`);

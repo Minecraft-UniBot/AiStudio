@@ -1,0 +1,135 @@
+# UniBot Extension Studio 单文件可执行版发布工作流
+#
+# 触发方式：
+#   1. 手动触发（workflow_dispatch）—— 只构建并上传 artifacts
+#   2. 推送 tag v*（如 v0.2.0）—— 构建并创建 GitHub Release 草稿
+#
+# 产物（每平台一个自包含可执行文件，双击即运行，无需安装 bun / opencode）：
+#   macOS ARM64 : unibot-studio-macos-arm64
+#   macOS x64   : unibot-studio-macos-x64
+#   Windows x64 : unibot-studio-windows-x64.exe
+#   Linux x64   : unibot-studio-linux-x64
+#
+# 说明：
+#   - 单文件 = 后端 bundle + 前端构建产物 + prompts/skills/validation/plugins + 内置 opencode
+#     （opencode 从 npm registry 获取平台二进制，随文件内置，用户无需另行安装）
+#   - 版本号取 tag 中 v 前缀之后的部分（v0.2.0 -> 0.2.0），手动触发用 git tag / 默认 0.1.0
+#   - 构建在原生 runner 上进行（bun build --compile 只能构建当前宿主平台）：
+#     macos-14(arm64) / macos-13(x64) / windows-latest / ubuntu-24.04
+#   - 本仓库为独立仓库（不含 Market/），server 测试依赖市场注册表
+#     Market/extensions.json，故额外拉取 MineJPGcraft/UniBot.Market 到 Market/
+
+name: Build Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: studio-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-14
+          - name: macos-x64
+            runner: macos-13
+          - name: windows-x64
+            runner: windows-latest
+          - name: linux-x64
+            runner: ubuntu-24.04
+          # ARM64 Linux 构建（GitHub 公开预览 runner）：
+          # - name: linux-arm64
+          #   runner: ubuntu-24.04-arm
+    env:
+      # 与 server/src/config.ts 的 opencode.version 保持一致
+      OPENCODE_VERSION: "1.18.18"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Studio 是独立仓库，不含 Market/；server 测试与提示词依赖市场注册表，
+      # 拉取到工作区根 Market/ 以匹配 config.ts 的路径解析（Studio/../Market）。
+      - name: Checkout Market registry
+        uses: actions/checkout@v4
+        with:
+          repository: MineJPGcraft/UniBot.Market
+          path: Market
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd server && bun install --frozen-lockfile
+          cd ../web && bun install --frozen-lockfile
+
+      - name: Run server tests
+        shell: bash
+        run: cd server && bun test
+
+      - name: Resolve app version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" = "$GITHUB_REF_NAME" ]; then VERSION=""; fi
+          echo "STUDIO_APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "构建版本：${VERSION:-git tag / 默认 0.1.0}"
+
+      - name: Fetch bundled opencode
+        shell: bash
+        run: bun release/scripts/fetch-opencode.ts
+
+      # 一键打包：安装依赖（幂等）→ 构建前端（vite）→ 编译单文件可执行版
+      # （server bundle + web/dist + prompts/skills/validation/plugins + 内置 opencode 全部嵌入）
+      - name: Build single-file executable
+        shell: bash
+        run: bun release/build.ts --name unibot-studio-${{ matrix.name }} --frozen
+
+      - name: Verify artifact
+        shell: bash
+        run: |
+          ls -la release/artifacts/
+          test -n "$(ls release/artifacts/ | grep -E '^unibot-studio-')"
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unibot-studio-${{ matrix.name }}
+          path: release/artifacts/unibot-studio-*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Collect artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create release draft
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "UniBot Extension Studio ${{ github.ref_name }}"
+          draft: true
+          files: release-artifacts/**
+          generate_release_notes: true
