@@ -109,6 +109,8 @@ function loadConfig(): StudioConfig {
   if (process.env.UNIBOT_DIR) {
     merged.unibot_dir = process.env.UNIBOT_DIR;
     merged.extensions_dir = join(process.env.UNIBOT_DIR, 'Extensions');
+    // 显式指定视为已配置（与 setUnibotDir 一致），避免首次登录仍引导确认
+    merged.unibot_configured = true;
   }
 
   // 口令：环境变量 > 已存配置 > 自动生成

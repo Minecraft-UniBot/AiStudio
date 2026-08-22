@@ -169,18 +169,21 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
 
 // ---- 主流程 ----
 
-/** 解析 --data <目录> / --data=<目录> 参数（指定数据目录，优先级高于环境变量） */
-function parseDataArg(args: string[]): { value?: string; error?: string } {
-  const eq = args.find((a) => a.startsWith('--data='));
+/**
+ * 解析目录参数：--<flag> <目录> 或 --<flag>=<目录>（如 --data / --unibot）。
+ * 目录参数优先级高于同名环境变量。
+ */
+function parseDirArg(args: string[], flag: string): { value?: string; error?: string } {
+  const eq = args.find((a) => a.startsWith(`${flag}=`));
   if (eq) {
-    const value = eq.slice('--data='.length);
-    if (!value) return { error: '--data 参数不能为空' };
+    const value = eq.slice(flag.length + 1);
+    if (!value) return { error: `${flag} 参数不能为空` };
     return { value };
   }
-  const idx = args.indexOf('--data');
+  const idx = args.indexOf(flag);
   if (idx !== -1) {
     const value = args[idx + 1];
-    if (!value || value.startsWith('--')) return { error: '--data 后缺少目录参数' };
+    if (!value || value.startsWith('--')) return { error: `${flag} 后缺少目录参数` };
     return { value };
   }
   return {};
@@ -196,12 +199,14 @@ async function main(): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`UniBot Extension Studio ${APP_VERSION}`);
     console.log('');
-    console.log('用法：unibot-studio [--version] [--help] [--data <目录>]');
+    console.log('用法：unibot-studio [--version] [--help] [--data <目录>] [--unibot <目录>]');
     console.log('');
     console.log('运行即启动本地服务器（默认 http://127.0.0.1:9876），自动打开浏览器。');
     console.log('选项：');
     console.log('  --data <目录>      指定数据目录（默认 ~/.unibot-studio，等价于环境变量');
     console.log('                     UNIBOT_STUDIO_DATA_DIR，且优先级更高）');
+    console.log('  --unibot <目录>    指定 UniBot 根目录（默认自动探测，等价于环境变量');
+    console.log('                     UNIBOT_DIR，且优先级更高；需含 Bot.py 或 Extensions/）');
     console.log('环境变量：');
     console.log('  UNIBOT_STUDIO_PORT       端口（默认 9876，被占用自动换空闲端口）');
     console.log('  UNIBOT_STUDIO_HOST       监听地址（默认 127.0.0.1）');
@@ -212,7 +217,7 @@ async function main(): Promise<void> {
   }
 
   // --data <目录>：写入环境变量（CLI 优先级 > 环境变量 > 默认值）
-  const dataArg = parseDataArg(args);
+  const dataArg = parseDirArg(args, '--data');
   if (dataArg.error) {
     error(dataArg.error);
     error('用法：unibot-studio --data <目录>（或 --data=<目录>）');
@@ -220,6 +225,29 @@ async function main(): Promise<void> {
   }
   if (dataArg.value) {
     process.env.UNIBOT_STUDIO_DATA_DIR = resolve(dataArg.value);
+  }
+
+  // --unibot <目录>：校验后写入环境变量（CLI 优先级 > 环境变量 > 配置 > 自动探测）
+  const unibotArg = parseDirArg(args, '--unibot');
+  if (unibotArg.error) {
+    error(unibotArg.error);
+    error('用法：unibot-studio --unibot <目录>（或 --unibot=<目录>）');
+    process.exit(1);
+  }
+  if (unibotArg.value) {
+    const dir = resolve(unibotArg.value);
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+      error(`UniBot 目录不存在：${dir}`);
+      process.exit(1);
+    }
+    // 与 server/src/config.ts setUnibotDir 的识别规则一致：Bot.py（源码根）或 Extensions/（运行根）
+    const looksLikeUnibot = existsSync(join(dir, 'Bot.py')) || existsSync(join(dir, 'Extensions'));
+    if (!looksLikeUnibot) {
+      error(`该目录看起来不像 UniBot：未找到 Bot.py 或 Extensions 目录（${dir}）`);
+      process.exit(1);
+    }
+    process.env.UNIBOT_DIR = dir;
+    log(`UniBot 目录：${dir}`);
   }
 
   // ---- 1. 数据目录与端口 ----
