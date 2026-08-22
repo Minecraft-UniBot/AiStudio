@@ -26,7 +26,7 @@ import { config } from './config';
 import { assertDiskSpace } from './disk';
 import { logger } from './logger';
 import { cloneTemplateSource, getTemplate } from './templates';
-import type { DraftMeta, ExtensionType } from './types';
+import type { DraftMeta, ExtensionType, McServerInfo } from './types';
 
 const MANIFEST_SCAFFOLD = `[manifest]
 schema_version = 1
@@ -290,6 +290,8 @@ export function createDraft(input: {
   agent: string;
   /** 开发模板：minimal / Default 等；省略或 minimal 走内置最小脚手架 */
   template_id?: string | null;
+  /** 目标 MC 服务器快照（可选）：注入规划/编码提示词，供 AI 结合真实服务器做技术选型 */
+  mc_server?: McServerInfo | null;
 }): DraftMeta {
   const existing = listDrafts();
   const extensionId = validateExtensionId(input.extension_id, existing);
@@ -315,6 +317,7 @@ export function createDraft(input: {
     description: input.description,
     types: input.types,
     template_id: input.template_id && input.template_id !== 'minimal' ? input.template_id : null,
+    mc_server: input.mc_server ?? null,
     owner_id: 'admin',
     status: 'draft',
     phase: 'planning',

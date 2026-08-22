@@ -31,9 +31,13 @@ const form = ref({
   agent: 'build',
 })
 
-// 打开对话框时刷新模板列表（Default 模板可能在启动后仍在后台拉取）
+// 打开对话框时刷新模板列表与目标服务器状态
+// （Default 模板可能在启动后仍在后台拉取；MC 服务器可能刚在其他页面设置过）
 watch(open, (val) => {
-  if (val) store.fetchTemplates().catch(() => {})
+  if (val) {
+    store.fetchTemplates().catch(() => {})
+    store.fetchMcServer().catch(() => {})
+  }
 })
 
 /** 扩展类型主选项（单选） */
@@ -117,6 +121,48 @@ async function retryPullTemplate() {
 const providerOptions = computed(() =>
   store.options.providers.map((p) => ({ value: p.provider_id, label: p.label })),
 )
+
+// ---- 目标 MC 服务器 ----
+const mc_picking = ref(false)
+
+/** 已选服务器摘要（如「Paper · 1.21.4 · 插件 12 / 模组 3」） */
+const mc_summary = computed(() => {
+  const info = store.mcServer?.info
+  if (!info) return ''
+  const parts = [info.label]
+  if (info.mc_version) parts.push(info.mc_version)
+  const counts = []
+  if (info.plugins?.length) counts.push(`插件 ${info.plugins.length}`)
+  if (info.mods?.length) counts.push(`模组 ${info.mods.length}`)
+  if (counts.length) parts.push(counts.join(' / '))
+  return parts.join(' · ')
+})
+
+/**
+ * 弹出系统目录选择窗口（由后端在本机打开）：选中后自动扫描并保存；
+ * 用户取消则静默返回，不打扰。
+ */
+async function pickServer() {
+  mc_picking.value = true
+  try {
+    const data = await store.pickMcServer()
+    if (data.picked) {
+      toast_success(`目标服务器已设置：${data.info?.label ?? data.dir}`)
+    }
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    mc_picking.value = false
+  }
+}
+
+async function removeMcServer() {
+  try {
+    await store.clearMcServer()
+  } catch (e) {
+    toast_error(e.message)
+  }
+}
 
 const providerModels = computed(() => {
   const provider = store.options.providers.find((p) => p.provider_id === form.value.provider_id)
@@ -236,6 +282,30 @@ function toggleCodeType(type) {
         <span class="form-hint">指令扩展发送 /xxx 指令，API 扩展提供可复用的服务能力</span>
       </div>
       <div class="field">
+        <label class="form-label">目标 MC 服务器（可选）</label>
+        <template v-if="store.mcServer?.configured">
+          <div class="server-chip">
+            <Icon icon="lucide:server" width="14" />
+            <span class="server-name">{{ mc_summary }}</span>
+            <button type="button" class="link" @click="removeMcServer">移除</button>
+          </div>
+          <span class="form-hint">
+            创建草稿时把服务端类型、版本与已装插件/模组快照提供给 AI，帮助其选择实现方案
+          </span>
+        </template>
+        <template v-else>
+          <div>
+            <button type="button" class="pick-btn" :disabled="mc_picking" @click="pickServer">
+              <Icon :icon="mc_picking ? 'lucide:loader-circle' : 'lucide:folder-open'" width="15" :class="{ spin: mc_picking }" />
+              {{ mc_picking ? '等待选择…' : '选择服务器文件夹' }}
+            </button>
+          </div>
+          <span class="form-hint">
+            点击后由本机弹出系统目录选择窗口，自动识别服务端（Paper / Fabric / Forge 等）、版本与插件/模组清单
+          </span>
+        </template>
+      </div>
+      <div class="field">
         <label class="form-label">模型</label>
         <span v-if="store.optionsError" class="form-hint danger">
           {{ store.optionsError }}
@@ -339,5 +409,60 @@ function toggleCodeType(type) {
 
 .row > * {
   flex: 1;
+}
+
+.pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  justify-content: center;
+  height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--transition),
+    color var(--transition);
+}
+
+.pick-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pick-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.spin {
+  animation: pick-spin 1s linear infinite;
+}
+
+@keyframes pick-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.server-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.server-name {
+  color: var(--text);
 }
 </style>

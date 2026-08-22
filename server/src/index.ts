@@ -49,6 +49,15 @@ import {
 import { assertFeatureEnabled } from './registry';
 import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './templates';
 import { PreviewError, listTemplateNames, renderTemplatePreview } from './preview';
+import {
+  McServerError,
+  clearMcServerDir,
+  getMcServerDir,
+  getMcServerInfo,
+  pickMcServerDir,
+  renderMcServerContext,
+  setMcServerDir,
+} from './mc_server';
 import type { DraftMeta } from './types';
 
 // ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效；签发/校验见 auth.ts） =====
@@ -132,6 +141,58 @@ async function handleRequest(req: Request): Promise<Response> {
     // 后台执行同步（可能耗时数分钟），完成后通过 unibot-env.updated 事件推送；立即返回当前状态
     void syncUnibotEnv().then((status) => broadcast({ type: 'unibot-env.updated', status }));
     return json(getUnibotEnvStatus());
+  }
+
+  // ---- 目标 MC 服务器（选择目录 → 扫描服务端类型/版本与插件模组 → 创建草稿时快照给 AI） ----
+  if (path === '/api/studio/mc-server') {
+    if (req.method === 'GET') {
+      const info = await getMcServerInfo();
+      return json({ configured: Boolean(info), dir: getMcServerDir(), info });
+    }
+    if (req.method === 'POST') {
+      try {
+        const body = (await req.json()) as { dir?: string };
+        const info = await setMcServerDir(body.dir ?? '');
+        logger.info('mc-server', '设置目标 MC 服务器', {
+          dir: info.dir,
+          type: info.type,
+          plugins: info.plugins.length,
+          mods: info.mods.length,
+        });
+        return json({ configured: true, dir: info.dir, info });
+      } catch (e) {
+        if (e instanceof McServerError) return errorJson(e.message);
+        return errorJson(`扫描服务器失败：${(e as Error).message}`);
+      }
+    }
+    if (req.method === 'DELETE') {
+      clearMcServerDir();
+      logger.info('mc-server', '清除目标 MC 服务器');
+      return json({ ok: true });
+    }
+  }
+
+  // 弹出系统原生「选择文件夹」窗口（后端在本机执行），选中后自动扫描并保存；
+  // 用户取消时返回 picked=false 与当前配置状态，前端静默保持原样
+  if (path === '/api/studio/mc-server/pick' && req.method === 'POST') {
+    try {
+      const dir = await pickMcServerDir();
+      if (!dir) {
+        const info = await getMcServerInfo();
+        return json({ picked: false, configured: Boolean(info), dir: getMcServerDir(), info });
+      }
+      const info = await setMcServerDir(dir);
+      logger.info('mc-server', '设置目标 MC 服务器（系统目录选择窗口）', {
+        dir: info.dir,
+        type: info.type,
+        plugins: info.plugins.length,
+        mods: info.mods.length,
+      });
+      return json({ picked: true, configured: true, dir: info.dir, info });
+    } catch (e) {
+      if (e instanceof McServerError) return errorJson(e.message);
+      return errorJson(`选择服务器失败：${(e as Error).message}`);
+    }
   }
 
   // ---- 测试工具（OpenCode 插件回调，对应 AGENT.md 3.5） ----
@@ -253,6 +314,8 @@ async function handleRequest(req: Request): Promise<Response> {
         model?: { provider_id?: string; model_id?: string } | null;
         agent?: string;
         template_id?: string | null;
+        /** 是否携带全局目标 MC 服务器上下文（默认 true；显式传 false 可跳过） */
+        mc_server?: boolean;
       };
       if (!body.extension_id || !body.name || !body.description) {
         return errorJson('缺少必填字段（extension_id / name / description）');
@@ -277,6 +340,8 @@ async function handleRequest(req: Request): Promise<Response> {
         );
       }
       const types = sanitizeTypes(body.types ?? []);
+      // 目标 MC 服务器：创建时快照（类型/版本/插件模组清单），规划与编码提示词据此做技术选型
+      const mcServerInfo = body.mc_server === false ? null : await getMcServerInfo();
       const draft = createDraft({
         extension_id: body.extension_id,
         name: body.name,
@@ -287,6 +352,7 @@ async function handleRequest(req: Request): Promise<Response> {
           : null,
         agent: body.agent ?? config.defaults.agent,
         template_id: templateId,
+        mc_server: mcServerInfo,
       });
 
       // 创建 OpenCode session 并进入「规划」阶段
@@ -311,11 +377,12 @@ async function handleRequest(req: Request): Promise<Response> {
         session_id: sessionId,
         types: draft.types,
         model: draft.model?.model_id ?? 'auto',
+        mc_server: mcServerInfo ? `${mcServerInfo.type}@${mcServerInfo.mc_version ?? '?'}` : null,
       });
 
       // 提示词模板化（Plan 7.1）：planning + system 均从 prompts/*.md 渲染，
       // 安全约束由后端追加（路径白名单、文档/市场白名单、联网规则），不进入可编辑模板
-      const security = buildSecurity(workspace);
+      const security = buildSecurity(workspace, mcServerInfo?.dir);
       const system = renderPromptWithSecurity('system', {
         allowlist: workspace,
         market_path: marketRegistryPath(),
@@ -328,6 +395,7 @@ async function handleRequest(req: Request): Promise<Response> {
         allowlist: workspace,
         market_path: marketRegistryPath(),
         docs_path: docsAllowlist(),
+        server_context: renderMcServerContext(mcServerInfo),
       }, security);
 
       await client.session.promptAsync({

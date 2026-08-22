@@ -4,6 +4,43 @@
  * 对应 Plan.md 第四章「状态模型」与第六章「后端 API 草案」。
  */
 
+/**
+ * MC 服务器上的插件/模组条目（从 jar 内清单提取的元数据）。
+ * 解析失败时仅保留文件名，meta 为空。
+ */
+export interface McPackageEntry {
+  /** 显示名（plugin.yml name / fabric.mod.json name / mods.toml displayName / 文件名兜底） */
+  name: string;
+  /** jar 文件名（含扩展名） */
+  file: string;
+  /** 清单声明的版本（缺失为 null） */
+  version: string | null;
+  /** 依赖的插件/模组 id 列表（Bukkit depend/softdepend、Fabric depends 等，可为空） */
+  depends?: string[];
+}
+
+/**
+ * MC 服务器扫描结果（服务端类型 + 版本 + 插件/模组清单）。
+ * 创建草稿时整体快照进 DraftMeta.mc_server，保证规划/编码提示词可复现。
+ */
+export interface McServerInfo {
+  /** 服务器根目录（绝对路径） */
+  dir: string;
+  /** 服务端类型：paper / purpur / folia / spigot / craftbukkit / fabric / forge / neoforge / quilt / vanilla / unknown */
+  type: string;
+  /** 类型展示名（如「Paper」「NeoForge」） */
+  label: string;
+  /** Minecraft 游戏版本（如 1.21.4；无法识别为 null） */
+  mc_version: string | null;
+  /** 加载器/核心版本（Fabric Loader / Forge / NeoForge / 核心端构建号；无法识别为 null） */
+  loader_version: string | null;
+  /** Bukkit 系插件（plugins/*.jar）；非 Bukkit 端为空数组 */
+  plugins: McPackageEntry[];
+  /** 模组（mods/*.jar + libraries 探测到的加载器信息不在此列）；非模组端为空数组 */
+  mods: McPackageEntry[];
+  scanned_at: string;
+}
+
 /** 草稿主状态机（规划 → 编码 → 机械校验 → 发布；编码阶段 AI 用测试工具自测） */
 export type DraftStatus =
   | 'draft'       // 已创建，未开始
@@ -69,6 +106,12 @@ export interface DraftMeta {
   types: ExtensionType[];
   /** 创建时所选的开发模板（minimal / Default 等）；用于可重复性与展示 */
   template_id?: string | null;
+  /**
+   * 创建时选择的目标 MC 服务器快照（类型/版本/插件模组清单）。
+   * 注入规划与编码提示词，供 AI 结合真实服务器环境做技术选型；
+   * 未选择服务器时为 null。
+   */
+  mc_server?: McServerInfo | null;
   owner_id: string;
   status: DraftStatus;
   /**
@@ -204,6 +247,8 @@ export interface StudioConfig {
   unibot_configured: boolean;
   /** UniBot 扩展发布目录（unibot_dir/Extensions） */
   extensions_dir: string;
+  /** 目标 MC 服务器目录（可选；创建草稿时扫描并快照进草稿元数据） */
+  mc_server_dir?: string;
   host: string;
   port: number;
   /** 前端静态资源目录（单文件可执行版：由 release/src/main.ts 解压内置 web/dist 后经 UNIBOT_STUDIO_STATIC_DIR 注入；为空则不提供静态服务） */

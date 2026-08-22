@@ -28,6 +28,8 @@ export const useStudioStore = defineStore('studio', () => {
   const optionsError = ref('')
   const templates = ref([])
   const templatesError = ref('')
+  // 目标 MC 服务器（{ configured, dir, info }；info 为扫描结果快照，见 server/mc_server.ts）
+  const mcServer = ref(null)
   const connected = ref(false)
   const error = ref('')
   const pendingPermissions = ref([])
@@ -67,6 +69,38 @@ export const useStudioStore = defineStore('studio', () => {
   async function pullTemplate(templateId) {
     await api(`/templates/${encodeURIComponent(templateId)}/pull`, { method: 'POST' })
     return fetchTemplates()
+  }
+
+  // ---- 目标 MC 服务器 ----
+  async function fetchMcServer() {
+    try {
+      mcServer.value = await api('/mc-server')
+    } catch {
+      // 后端异常时保持旧值（未配置时界面按「未选择」处理）
+    }
+    return mcServer.value
+  }
+
+  /** 设置目标服务器目录：后端校验 + 扫描 + 落盘，返回 { configured, dir, info } */
+  async function saveMcServer(dir) {
+    const data = await api('/mc-server', { method: 'POST', body: { dir } })
+    mcServer.value = data
+    return data
+  }
+
+  /**
+   * 弹出后端原生「选择文件夹」窗口：选中后自动扫描并保存；
+   * 用户取消返回 { picked: false }（保持原配置），不视为错误。
+   */
+  async function pickMcServer() {
+    const data = await api('/mc-server/pick', { method: 'POST' })
+    if (data.picked) mcServer.value = data
+    return data
+  }
+
+  async function clearMcServer() {
+    await api('/mc-server', { method: 'DELETE' })
+    mcServer.value = { configured: false, dir: '', info: null }
   }
 
   // ---- 草稿 ----
@@ -317,6 +351,11 @@ export const useStudioStore = defineStore('studio', () => {
     fetchOptions,
     fetchTemplates,
     pullTemplate,
+    mcServer,
+    fetchMcServer,
+    saveMcServer,
+    pickMcServer,
+    clearMcServer,
     fetchDrafts,
     createDraft,
     fetchDraft,

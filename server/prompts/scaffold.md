@@ -1,6 +1,6 @@
 ---
 name: scaffold
-version: 6
+version: 7
 ---
 
 # 第二阶段：实现编码
@@ -16,6 +16,12 @@ version: 6
 4. 更新 `Extension.toml`：补全 `[extension]` 元数据与 `[dependencies]` 声明
 5. 在 `tests/` 下编写/补全 pytest 测试
 6. **编码结束后必须在共享测试环境用测试工具自测**（见下方「自测要求」），确认功能真实可用后再收尾
+
+## 目标服务器环境（实现时遵循）
+
+用户目标 Minecraft 服务器的真实环境如下，涉及与服务器生态交互的实现必须与其匹配：
+
+{{server_context}}
 
 ## 扩展规范要点
 
