@@ -12,7 +12,7 @@
  *   3. 把内置资源解压到 <数据目录>/resources（带版本标记，升级后自动重新解压）
  *   4. 用 UNIBOT_STUDIO_RES_DIR / UNIBOT_STUDIO_STATIC_DIR 把后端与静态页指向解压产物
  *   5. 在同一进程内启动后端（REST / WebSocket / 前端静态页全部同源）
- *   6. 打印访问地址与口令，并自动打开浏览器
+ *   6. 打印访问地址与口令（访问地址拼接登录 token，直接打开即可进入平台）
  *
  * 资源嵌入方式：bun build --compile --asset=<目录>（Bun >= 1.4 的 compile.assets），
  * 运行时位于 import.meta.dir 下的原始相对路径，可用 node:fs 读取。因为
@@ -25,7 +25,6 @@
  */
 import { homedir } from 'node:os';
 import { createServer as createTcpServer } from 'node:net';
-import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -138,20 +137,6 @@ function extractTree(src: string, dest: string): boolean {
   return true;
 }
 
-/** 打开系统默认浏览器（尽力而为，失败不阻塞） */
-function openBrowser(url: string) {
-  if (process.env.UNIBOT_STUDIO_NO_BROWSER === '1') return;
-  try {
-    const win = process.platform === 'win32';
-    const cmd = win ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-    const args = win ? ['/c', 'start', '', url] : [url];
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
-    child.unref();
-  } catch {
-    // 忽略：无浏览器环境（如无头服务器）时仅打印地址
-  }
-}
-
 /** 等待服务器 HTTP 就绪（登录页静态资源无需认证，直接 GET / ） */
 async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -201,7 +186,8 @@ async function main(): Promise<void> {
     console.log('');
     console.log('用法：unibot-studio [--version] [--help] [--data <目录>] [--unibot <目录>]');
     console.log('');
-    console.log('运行即启动本地服务器（默认 http://127.0.0.1:9876），自动打开浏览器。');
+    console.log('运行即启动本地服务器（默认 http://127.0.0.1:9876），启动后打印访问地址与口令；');
+    console.log('访问地址拼接了登录 token，直接打开浏览器访问即可进入平台。');
     console.log('选项：');
     console.log('  --data <目录>      指定数据目录（默认 ~/.unibot-studio，等价于环境变量');
     console.log('                     UNIBOT_STUDIO_DATA_DIR，且优先级更高）');
@@ -212,7 +198,6 @@ async function main(): Promise<void> {
     console.log('  UNIBOT_STUDIO_HOST       监听地址（默认 127.0.0.1）');
     console.log('  UNIBOT_STUDIO_DATA_DIR   数据目录（默认 ~/.unibot-studio）');
     console.log('  UNIBOT_STUDIO_PASSWORD   访问口令（默认首次启动自动生成）');
-    console.log('  UNIBOT_STUDIO_NO_BROWSER 设为 1 时不自动打开浏览器');
     return;
   }
 
@@ -337,11 +322,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // ---- 6. 就绪提示 + 自动打开浏览器 ----
-  const url = `http://127.0.0.1:${port}/`;
-  await waitForHttp(url, 30_000);
-  log(`已就绪：${url}（Ctrl+C 停止）`);
-  openBrowser(url);
+  // ---- 6. 就绪提示（访问地址带登录 token，统一走后端 logger 输出；不再自动打开浏览器） ----
+  // 动态 import：env 就绪后再加载 server 模块（本文件不能在模块顶层 import server 模块）——
+  // 此时 index.ts 已完成启动（enableFileLogging 已开启），logger 与 index.ts 写入同一日志文件。
+  const { issueToken } = await import('../../server/src/auth.ts');
+  const { logger } = await import('../../server/src/logger.ts');
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  await waitForHttp(baseUrl, 30_000);
+  logger.info('server', `已就绪：${baseUrl}?token=${issueToken()}（Ctrl+C 停止）`);
 }
 
 void main();

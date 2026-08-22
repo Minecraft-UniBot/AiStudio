@@ -65,7 +65,7 @@ async function login() {
       </form>
       <p class="hint">
         <Icon icon="lucide:info" width="13" />
-        口令存储在后端配置（~/.unibot-studio/config/studio.json），首次启动自动生成
+        口令存储在后端配置中，首次启动自动生成
       </p>
     </div>
   </div>

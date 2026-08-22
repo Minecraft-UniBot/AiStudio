@@ -35,14 +35,15 @@ unibot-studio --help                     # 查看用法与环境变量
 首次运行会把内置资源解压到数据目录 `<数据目录>/resources`（默认 `~/.unibot-studio/resources`，
 带版本标记，升级后自动重新解压），并自动下载 opencode（约 45MB，仅此一次）到
 `<数据目录>/opencode-bin/`；默认端口 9876 被占用时自动换空闲端口；
-启动后打印访问地址与访问口令，并自动打开浏览器（`UNIBOT_STUDIO_NO_BROWSER=1` 关闭）。
+启动后打印访问地址与访问口令：访问地址拼接了登录 token（`http://127.0.0.1:<端口>/?token=xxx`），
+直接复制到浏览器打开即可进入平台，无需手动登录。
 日志同时落盘 `<数据目录>/logs/studio.log`。
 
 ## 目录结构
 
 ```text
 release/
-├── src/main.ts               # 可执行入口：解压内置资源 → 设置 env → 动态加载后端 → 打开浏览器
+├── src/main.ts               # 可执行入口：解压内置资源 → 设置 env → 动态加载后端 → 打印登录地址
 ├── src/version.generated.ts  # 版本号（build.ts 自动写入，默认值随仓库提交）
 ├── build.ts                  # 一键打包脚本
 ├── vendor/                   # 打包暂存：预打包插件产物（gitignored）

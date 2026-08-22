@@ -190,7 +190,7 @@ run(bunExecutable(), buildArgs, REPO_ROOT);
 if (!existsSync(outfile)) throw new Error(`编译失败：未生成 ${outfile}`);
 if (process.platform !== "win32") chmodSync(outfile, 0o755);
 console.log(`\n==> 打包完成：${outfile}（${(statSync(outfile).size / 1024 / 1024).toFixed(1)} MB）`);
-console.log(`    目标平台：${COMPILE_TARGET ?? "当前宿主"}；直接运行即启动服务器并自动打开浏览器。`);
+console.log(`    目标平台：${COMPILE_TARGET ?? "当前宿主"}；直接运行即启动服务器，终端会打印携带登录 token 的访问地址。`);
 
 function readFileSyncSafe(file: string): string {
   try {

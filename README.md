@@ -37,7 +37,7 @@ Studio/
 │       ├── stores/studio.js     # Pinia store
 │       └── utils/               # api 封装、状态映射
 ├── release/                     # 单文件可执行版打包（见下方「单文件可执行版」）
-│   ├── src/main.ts              # 可执行入口：解压内置资源 → 启动服务器 → 打开浏览器
+│   ├── src/main.ts              # 可执行入口：解压内置资源 → 启动服务器 → 打印登录地址
 │   └── build.ts                 # 一键打包脚本（bun build --compile --asset）
 └── Install.sh
 ```
@@ -61,8 +61,9 @@ cd web && bun run dev
 ## 单文件可执行版
 
 `release/` 把「后端 + 前端 + 内置资源」打包成**一个自包含可执行文件**：
-运行即自动初始化并启动服务器（REST / WebSocket / 前端页面同源），并自动打开浏览器，
-无需任何其他操作。opencode 不内置（减小安装包体积）：**首次启动时自动下载**
+运行即自动初始化并启动服务器（REST / WebSocket / 前端页面同源），并在终端打印
+携带登录 token 的访问地址（直接复制到浏览器即可进入平台），无需任何其他操作。
+opencode 不内置（减小安装包体积）：**首次启动时自动下载**
 到数据目录（`~/.unibot-studio/opencode-bin/`，约 45MB，带版本标记复用），用户无需安装。
 
 ```bash
@@ -71,9 +72,9 @@ bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 r
 
 - 打包内容：server bundle + `web/dist` + `prompts/skills/validation/plugins`（opencode 首次启动自动下载）
 - 运行行为：首次运行解压内置资源（`~/.unibot-studio/resources`，带版本标记自动更新）并下载 opencode，
-  默认端口 9876 被占用时自动换空闲端口，启动后打印访问地址与口令并打开浏览器
+  默认端口 9876 被占用时自动换空闲端口，启动后打印访问地址（拼接登录 token，直接打开即可进入平台）与口令
 - 命令行：`--version` / `--help` / `--data <目录>`（指定数据目录）/ `--unibot <目录>`（指定 UniBot 根目录，
-  均优先于同名环境变量）；环境变量同下方「配置」表（另有 `UNIBOT_STUDIO_NO_BROWSER=1` 关闭自动开浏览器）
+  均优先于同名环境变量）；环境变量同下方「配置」表
 - 发布工作流：`.github/workflows/release.yml`（手动触发，或推送 tag `v*` 自动构建并创建 Release 草稿），
   产物为各平台自包含可执行文件：`unibot-studio-{macos-arm64,macos-x64,windows-x64,linux-x64}[.exe]`
   （macOS x64 由 macOS ARM64 runner 交叉编译，best-effort，失败不影响发布）
@@ -94,7 +95,6 @@ bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 r
 | `UNIBOT_STUDIO_LOG_LEVEL` | 日志级别：`debug` / `info` / `warn` / `error`（默认 `info`） |
 | `UNIBOT_STUDIO_LOG_FILE` | 日志文件路径（默认 `<数据目录>/logs/studio.log`；设 `off` 关闭落盘） |
 | `OPENCODE_BIN` | opencode 可执行文件路径 |
-| `UNIBOT_STUDIO_NO_BROWSER` | 单文件版：设为 `1` 时启动后不自动打开浏览器 |
 
 日志同时输出到控制台（终端自动配色，`NO_COLOR` 可关闭，`UNIBOT_STUDIO_LOG_COLOR=1/0` 显式开关优先）
 与 `<数据目录>/logs/studio.log`（单行纯文本，无 ANSI，超 20MB 自动轮转为 `.log.1`）。

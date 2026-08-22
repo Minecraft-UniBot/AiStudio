@@ -1016,8 +1016,11 @@ for (const draft of listDrafts()) {
 // 启动横幅放在 startEventConsumer 之前：它是无限循环（永不 resolve），
 // 放在 await 之后会导致「启动完成 / 访问口令」永远不打印。
 const oc = opencode.getStatus();
+// 访问地址拼接登录 token：前端对根路径携带的 ?token= 会直接作为登录态使用，
+// 因此把启动横幅里的地址打印成可直接打开的登录链接。
+const accessUrl = `http://${config.host}:${config.port}/?token=${issueToken()}`;
 logger.info('server', 'Extension Studio 启动完成', {
-  url: `http://${config.host}:${config.port}`,
+  url: accessUrl,
   data_dir: config.data_dir,
   log_file: logFilePath ?? 'off',
   unibot_dir: config.unibot_dir,
