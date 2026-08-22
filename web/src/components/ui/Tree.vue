@@ -16,18 +16,23 @@ const props = defineProps({
 
 const emit = defineEmits(['select'])
 
-/** 收集全部目录 path（用于默认展开） */
+/** 目录默认展开的子项数量上限：文件夹直接子项（文件/子目录）超过 10 个时默认保持折叠 */
+const DEFAULT_EXPAND_CHILD_LIMIT = 10
+
+/** 收集默认展开的目录 path：仅子项数 ≤ 10 的目录加入（超限目录默认折叠） */
 function collect_dirs(nodes, acc = []) {
   for (const node of nodes) {
     if (node.children?.length) {
-      acc.push(node.path)
+      if (node.children.length <= DEFAULT_EXPAND_CHILD_LIMIT) {
+        acc.push(node.path)
+      }
       collect_dirs(node.children, acc)
     }
   }
   return acc
 }
 
-/** 展开状态：新出现的目录自动展开，用户手动折叠的保持折叠 */
+/** 展开状态：新出现的目录自动展开（超 10 项的文件夹除外），用户手动折叠的保持折叠 */
 const expanded = ref([])
 watch(
   () => props.nodes,

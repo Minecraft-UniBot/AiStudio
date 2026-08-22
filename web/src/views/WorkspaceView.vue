@@ -54,11 +54,36 @@ const canPublish = computed(
     draft.value?.status === 'ready' &&
     !revisionDirty.value,
 )
-/** 是否为渲染包（模板）扩展：有 Templates 目录才显示预览图标 */
+/** 是否为渲染包（模板）扩展：有 Templates 目录才显示预览 Tab + 预览图标
+ * 代码扩展（command/api）没有 Templates 目录，不显示预览 Tab */
 const draftHasTemplates = computed(
   () =>
     Array.isArray(store.files) &&
     store.files.some((f) => f.path.startsWith('Templates/')),
+)
+
+/** 手机端单栏 Tabs：无模板的代码扩展不出现「预览」 */
+const mobile_tabs = computed(() => {
+  const tabs = [
+    { id: 'result', label: '对话' },
+    { id: 'check', label: '检查' },
+    { id: 'settings', label: '结果与设置' },
+  ]
+  if (draftHasTemplates.value) {
+    tabs.splice(1, 0, { id: 'preview', label: '预览' })
+  }
+  return tabs
+})
+
+// 预览不可用时（如代码扩展 / Templates 目录被删），退回「功能」Tab
+watch(
+  draftHasTemplates,
+  (has_templates) => {
+    if (!has_templates && activeTab.value === 'preview') {
+      activeTab.value = 'result'
+    }
+  },
+  { immediate: true },
 )
 
 // ===== 主操作按钮状态机（规划 → 编码 → 校验后发布） =====
@@ -340,12 +365,7 @@ onUnmounted(() => {
     <!-- 手机端 Tab 切换（Plan 3.2） -->
     <nav class="mobile-tabs">
       <button
-        v-for="tab in [
-          { id: 'result', label: '对话' },
-          { id: 'preview', label: '预览' },
-          { id: 'check', label: '检查' },
-          { id: 'settings', label: '结果与设置' },
-        ]"
+        v-for="tab in mobile_tabs"
         :key="tab.id"
         class="mobile-tab"
         :class="{ active: activeTab === tab.id }"
@@ -407,9 +427,9 @@ onUnmounted(() => {
           <div class="panel-head">
             <div class="tabs">
               <button class="tab" :class="{ active: activeTab === 'result' }" @click="activeTab = 'result'">功能</button>
-              <button class="tab" :class="{ active: activeTab === 'preview' }" @click="activeTab = 'preview'">
+              <button v-if="draftHasTemplates" class="tab" :class="{ active: activeTab === 'preview' }" @click="activeTab = 'preview'">
                 预览
-                <Icon v-if="draftHasTemplates" icon="lucide:layout-template" width="12" />
+                <Icon icon="lucide:layout-template" width="12" />
               </button>
               <button class="tab" :class="{ active: activeTab === 'check' }" @click="activeTab = 'check'">
                 检查
