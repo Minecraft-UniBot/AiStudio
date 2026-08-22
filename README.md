@@ -76,6 +76,7 @@ bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 r
   均优先于同名环境变量）；环境变量同下方「配置」表（另有 `UNIBOT_STUDIO_NO_BROWSER=1` 关闭自动开浏览器）
 - 发布工作流：`.github/workflows/release.yml`（手动触发，或推送 tag `v*` 自动构建并创建 Release 草稿），
   产物为各平台自包含可执行文件：`unibot-studio-{macos-arm64,macos-x64,windows-x64,linux-x64}[.exe]`
+  （macOS x64 由 macOS ARM64 runner 交叉编译，best-effort，失败不影响发布）
 
 开发模式仍走源码运行：`cd server && bun src/index.ts` + `cd web && bun run dev`。
 

@@ -9,6 +9,9 @@
 ```bash
 # 要求 Bun >= 1.4.0（--asset 目录嵌入支持）
 bun release/build.ts [--outdir release/artifacts] [--name unibot-studio] [--force-web]
+# 交叉编译到其他平台（如用 ARM Mac 编 x64）：
+bun release/build.ts --name unibot-studio-macos-x64 --target bun-darwin-x64
+# 可用目标：bun-darwin-x64 / bun-darwin-arm64 / bun-linux-x64 / bun-windows-x64 等
 ```
 
 流程（build.ts 自动完成）：
@@ -49,5 +52,6 @@ release/
 ## 发布
 
 推送 tag `v*`（如 `v0.2.0`）或手动触发 `.github/workflows/release.yml`：
-在原生 runner 上分别为 macOS ARM64 / macOS x64 / Windows x64 / Linux x64 构建
-`unibot-studio-<平台>[.exe]`，tag 推送会自动创建 Release 草稿并附上全部产物。
+在原生 runner 上分别构建 macOS ARM64 / Windows x64 / Linux x64（`unibot-studio-<平台>[.exe]`）；
+macOS x64 变体由 macOS ARM64 runner 交叉编译生成（`--target bun-darwin-x64`，best-effort，
+失败不影响发布）。tag 推送会自动创建 Release 草稿并附上全部产物。

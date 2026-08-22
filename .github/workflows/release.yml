@@ -6,7 +6,7 @@
 #
 # 产物（每平台一个自包含可执行文件，双击即运行，无需安装 bun / opencode）：
 #   macOS ARM64 : unibot-studio-macos-arm64
-#   macOS x64   : unibot-studio-macos-x64
+#   macOS x64   : unibot-studio-macos-x64（由 macos ARM64 runner 交叉编译，best-effort）
 #   Windows x64 : unibot-studio-windows-x64.exe
 #   Linux x64   : unibot-studio-linux-x64
 #
@@ -15,8 +15,9 @@
 #     （opencode 不内置以减小体积：首次启动时由后端自动下载到数据目录，
 #      见 server/src/opencode_download.ts，用户无需另行安装）
 #   - 版本号取 tag 中 v 前缀之后的部分（v0.2.0 -> 0.2.0），手动触发用 git tag / 默认 0.1.0
-#   - 构建在原生 runner 上进行（bun build --compile 只能构建当前宿主平台）：
-#     macos-14(arm64) / macos-13(x64) / windows-latest / ubuntu-24.04
+#   - 构建在原生 runner 上进行：macos-14(arm64) / windows-latest / ubuntu-24.04；
+#     macOS x64 变体由 macos-14 交叉编译（--target=bun-darwin-x64）生成，
+#     交叉编译失败不影响发布（continue-on-error + 空产物跳过上传）
 #   - 本仓库为独立仓库（不含 Market/），server 测试依赖市场注册表
 #     Market/extensions.json，故额外拉取 MineJPGcraft/UniBot.Market 到 Market/
 
@@ -45,8 +46,6 @@ jobs:
         include:
           - name: macos-arm64
             runner: macos-14
-          - name: macos-x64
-            runner: macos-13
           - name: windows-x64
             runner: windows-latest
           - name: linux-x64
@@ -94,6 +93,14 @@ jobs:
         shell: bash
         run: bun release/build.ts --name unibot-studio-${{ matrix.name }} --frozen
 
+      # macOS x64 变体：由 macos-14（ARM64）runner 交叉编译（bun build --compile --target）。
+      # 交叉编译失败不阻塞发布：continue-on-error，下方 x64 上传步骤按文件是否存在兜底。
+      - name: Cross-compile macOS x64 variant
+        if: matrix.name == 'macos-arm64'
+        continue-on-error: true
+        shell: bash
+        run: bun release/build.ts --name unibot-studio-macos-x64 --target bun-darwin-x64 --frozen
+
       - name: Verify artifact
         shell: bash
         run: |
@@ -104,8 +111,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unibot-studio-${{ matrix.name }}
-          path: release/artifacts/unibot-studio-*
+          path: release/artifacts/unibot-studio-${{ matrix.name }}*
           if-no-files-found: error
+
+      # x64 交叉编译产物：文件存在才上传（交叉编译失败时静默跳过）
+      - name: Upload macOS x64 cross-compiled artifact
+        if: matrix.name == 'macos-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unibot-studio-macos-x64
+          path: release/artifacts/unibot-studio-macos-x64
+          if-no-files-found: warn
 
   release:
     name: Create GitHub Release

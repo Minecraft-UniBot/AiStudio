@@ -11,6 +11,8 @@
  *   bun release/build.ts [选项]
  *     --outdir <dir>        产物输出目录（默认 release/artifacts）
  *     --name <name>         产物文件名（默认 unibot-studio，Windows 自动加 .exe）
+ *     --target <bun-target> bun build --compile 的目标平台（默认当前宿主；可交叉编译，
+ *                           如 --target bun-darwin-x64 / bun-windows-x64 / bun-linux-x64）
  *     --force-web           总是重新构建前端（默认 dist 比源码新则跳过）
  *     --frozen              安装依赖时使用 --frozen-lockfile（CI 用）
  *
@@ -33,11 +35,18 @@ function flag(name: string): boolean {
   return args.includes(name);
 }
 function flagValue(name: string): string | undefined {
-  const hit = args.find((a) => a.startsWith(`${name}=`));
-  return hit?.slice(name.length + 1);
+  // 支持 --name=xxx 与 --name xxx 两种形式（CI 用空格分隔）
+  const eq = args.find((a) => a.startsWith(`${name}=`));
+  if (eq) return eq.slice(name.length + 1);
+  const idx = args.indexOf(name);
+  if (idx !== -1 && idx + 1 < args.length && !args[idx + 1].startsWith("--")) {
+    return args[idx + 1];
+  }
+  return undefined;
 }
 const OUTDIR = resolve(flagValue("--outdir") ?? join(RELEASE_DIR, "artifacts"));
 let NAME = flagValue("--name") ?? "unibot-studio";
+const COMPILE_TARGET = flagValue("--target");
 const FORCE_WEB = flag("--force-web");
 const FROZEN = flag("--frozen");
 
@@ -171,6 +180,7 @@ const buildArgs = [
   "--minify",
   "--outfile",
   outfile,
+  ...(COMPILE_TARGET ? [`--target=${COMPILE_TARGET}`] : []),
   ...assets.map((a) => `--asset=${a}`),
 ];
 console.log(`==> 编译单文件可执行版 → ${outfile}`);
@@ -180,7 +190,7 @@ run(bunExecutable(), buildArgs, REPO_ROOT);
 if (!existsSync(outfile)) throw new Error(`编译失败：未生成 ${outfile}`);
 if (process.platform !== "win32") chmodSync(outfile, 0o755);
 console.log(`\n==> 打包完成：${outfile}（${(statSync(outfile).size / 1024 / 1024).toFixed(1)} MB）`);
-console.log("    直接运行该文件即启动服务器并自动打开浏览器；--version 查看版本。");
+console.log(`    目标平台：${COMPILE_TARGET ?? "当前宿主"}；直接运行即启动服务器并自动打开浏览器。`);
 
 function readFileSyncSafe(file: string): string {
   try {
