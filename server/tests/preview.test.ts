@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, statSync } from 'node:fs';
-import { previewScriptPath } from '../src/config';
+import { previewScriptPath } from '../src/core/config';
 
 describe('模板预览脚本路径', () => {
   test('previewScriptPath 指向存在的渲染脚本', () => {

@@ -21,10 +21,10 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { config } from './config';
-import { assertDiskSpace } from './disk';
-import { logger } from './logger';
-import type { UnibotEnvStatus } from './types';
+import { config } from '../core/config';
+import { assertDiskSpace } from '../core/disk';
+import { logger } from '../core/logger';
+import type { UnibotEnvStatus } from '../core/types';
 
 /** 内存中的运行状态（磁盘状态由 getUnibotEnvStatus 实时探测） */
 const state: UnibotEnvStatus = {

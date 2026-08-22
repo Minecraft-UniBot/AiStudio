@@ -29,10 +29,10 @@ import { mkdirSync, existsSync, copyFileSync, rmSync, readdirSync, statSync, rea
 import { createServer as createTcpServer } from 'node:net';
 import { join } from 'node:path';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
-import { config, resSrcDir } from './config';
-import { ensureOpencodeBin } from './opencode_download';
-import { issueToken } from './auth';
-import { logger } from './logger';
+import { config, resSrcDir } from '../core/config';
+import { ensureOpencodeBin } from './download';
+import { issueToken } from '../core/auth';
+import { logger } from '../core/logger';
 
 const OPENCODE_HEALTH_RETRIES = 60;
 const OPENCODE_HEALTH_INTERVAL_MS = 500;
@@ -326,10 +326,14 @@ class OpenCodeGateway {
   }
 
   /**
-   * 注入 LLM 超时配置到隔离配置目录（AGENT.md 3.5 需求）：
-   * 思考模型长时间无输出时，opencode 默认的 chunkTimeout（30s）会提前掐断请求。
-   * 在 <opencode data>/config/opencode/opencode.jsonc 写入常见 provider 的
+   * 注入 LLM 超时配置到隔离配置目录（AGENT.md「输出停止」排查结论）：
+   * 思考模型长时间无输出时，opencode 默认的 chunkTimeout（约 30s）会提前掐断请求。
+   * 在 <opencode data>/config/opencode/opencode.jsonc 写入
    * options.timeout / options.chunkTimeout（只补未显式配置的项，优先保留用户配置）。
+   *
+   * 覆盖范围：配置文件中已出现的所有 provider + 常见内置 provider + opencode 网关
+   * （provider id 为 "opencode"，免费/共享模型走此通道——此前只注入固定 7 家，
+   * 恰好漏掉实际使用的网关 provider，导致默认 chunkTimeout 仍然生效）。
    */
   private syncTimeoutConfig(): void {
     try {
@@ -344,11 +348,28 @@ class OpenCodeGateway {
       } catch {
         // 配置损坏则从默认开始
       }
+      const KNOWN_PROVIDERS = [
+        'anthropic',
+        'openai',
+        'deepseek',
+        'openrouter',
+        'gemini',
+        'azure',
+        'github-copilot',
+        'opencode', // opencode 网关（Zen 共享模型）
+        'groq',
+        'mistral',
+        'xai',
+      ];
       const provider = (cfg.provider as Record<string, unknown>) ?? {};
       const timeout = config.opencode.timeout_ms;
       const chunkTimeout = config.opencode.chunk_timeout_ms;
-      for (const id of ['anthropic', 'openai', 'deepseek', 'openrouter', 'gemini', 'azure', 'github-copilot']) {
+      const covered = new Set<string>();
+      for (const id of [...Object.keys(provider), ...KNOWN_PROVIDERS]) {
+        if (covered.has(id)) continue;
+        covered.add(id);
         const p = (provider[id] as Record<string, unknown>) ?? {};
+        // 自定义 provider 可能用嵌套 npm/options 结构；options 缺失时补一层
         const options = (p.options as Record<string, unknown>) ?? {};
         // 用户已显式配置的超时以用户为准；未配置则注入平台默认（调大）
         if (options.timeout === undefined) options.timeout = timeout;
@@ -358,7 +379,9 @@ class OpenCodeGateway {
       }
       cfg.provider = provider;
       writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
-      logger.info('opencode', `已注入 LLM 超时配置（timeout=${timeout}ms, chunkTimeout=${chunkTimeout}ms）`);
+      logger.info('opencode', `已注入 LLM 超时配置（timeout=${timeout}ms, chunkTimeout=${chunkTimeout}ms）`, {
+        providers: [...covered].sort(),
+      });
     } catch (e) {
       logger.error('opencode', '注入 LLM 超时配置失败', { error: (e as Error).message });
     }

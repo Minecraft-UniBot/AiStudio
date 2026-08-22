@@ -6,39 +6,39 @@
 
 ## 功能
 
-- **创建草稿**：从空白脚手架创建 `api` / `command` 类型扩展，一句话描述需求
-- **AI 协作开发**：OpenCode 在隔离草稿工作区中生成代码，实时展示消息、推理与工具调用
+- **创建草稿**：从内置最小脚手架或 Default 扩展模板创建，一句话描述需求；可选目标 MC 服务器（扫描类型/版本/插件模组注入提示词）
+- **两阶段生成**：AI 先输出规划（PLAN.md），再进入编码；编码阶段用 `unibot_*` 测试工具把扩展部署到共享测试环境加载、运行测试、当场修复
 - **后台自动校验**：路径检查、`Extension.toml` 严格校验、Python 语法与 import 边界、Ruff、pytest、Loader 绑定、依赖声明
-- **AI 自测（OpenCode 插件测试工具）**：编码时 AI 用 `unibot_*` 工具把扩展部署到共享测试环境并加载、运行测试，当场修复
-- **一键发布**：核对文件摘要后原子交付到 `UniBot/Extensions/<id>/`，已存在则拒绝覆盖
+- **一键发布**：核对文件 SHA-256 摘要后原子交付到 `UniBot/Extensions/<id>/`，已存在则拒绝覆盖
 - **可恢复**：草稿元数据、会话、消息、校验结果落盘，刷新页面不丢失进度
 
 ## 目录结构
 
 ```text
 Studio/
-├── server/                      # 后端：Bun + TypeScript
+├── server/                        # 后端：Bun + TypeScript
 │   ├── src/
-│   │   ├── index.ts             # REST / WebSocket 路由与平台认证
-│   │   ├── opencode.ts          # OpenCode 网关（子进程 + SDK + 插件/超时注入）
-│   │   ├── drafts.ts            # 草稿 CRUD、脚手架、路径安全、文件摘要
-│   │   ├── validation.ts        # 校验流水线编排
-│   │   ├── test_tools.ts        # 测试工具后端：部署/加载/测试/日志
-│   │   ├── publishing.ts        # 原子发布器
-│   │   ├── events.ts            # SSE 事件归一化与 WebSocket 广播
-│   │   └── config.ts            # 平台配置
-│   ├── validation/              # UniBot 校验脚本（只读复用 UniBot 工具链）
-│   │   └── validate_extension.py
-│   └── prompts/                 # 提示词模板
-├── web/                         # 前端：Vue 3 + Vite（独立应用）
+│   │   ├── index.ts               # REST / WebSocket 路由与平台认证
+│   │   ├── paths.ts               # src 根锚点（资源定位基准）
+│   │   ├── core/                  # config / auth / logger / disk / types
+│   │   ├── opencode/              # gateway（子进程+SDK）/ download / events（SSE 归一化）
+│   │   ├── studio/                # drafts / sessions / validation / publishing /
+│   │   │                          # test_tools / templates / preview / mc_server / unibot_env
+│   │   └── ai/                    # pipeline / prompts / skills / tools / registry
+│   ├── validation/                # UniBot 校验脚本（只读复用 UniBot 工具链）
+│   ├── prompts/                   # 提示词模板 + 本地文档白名单副本
+│   ├── skills/                    # 按扩展类型加载的开发技能
+│   ├── plugins/                   # OpenCode 插件：unibot_* 测试工具
+│   └── tests/                     # bun test 单元测试
+├── web/                           # 前端：Vue 3 + Vite（独立应用）
 │   └── src/
-│       ├── views/               # Login / Drafts / Workspace / Admin
-│       ├── components/studio/   # MessagePart / PermissionRequest
-│       ├── stores/studio.js     # Pinia store
-│       └── utils/               # api 封装、状态映射
-├── release/                     # 单文件可执行版打包（见下方「单文件可执行版」）
-│   ├── src/main.ts              # 可执行入口：解压内置资源 → 启动服务器 → 打印登录地址
-│   └── build.ts                 # 一键打包脚本（bun build --compile --asset）
+│       ├── views/                 # Login / Drafts / Workspace / Admin
+│       ├── components/studio/     # ConversationPanel / MessagePart / TemplatePreview …
+│       ├── stores/studio.js       # Pinia store
+│       └── utils/                 # api 封装、状态映射
+├── release/                       # 单文件可执行版打包（见下方「单文件可执行版」）
+│   ├── src/main.ts                # 可执行入口：解压内置资源 → 启动服务器 → 打印登录地址
+│   └── build.ts                   # 一键打包脚本（bun build --compile --asset）
 └── Install.sh
 ```
 
@@ -110,6 +110,5 @@ bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 r
 
 ## 文档
 
-- 方案设计：`Studio/Plan.md`
+- 架构与实现现状、编码规范：`Studio/AGENT.md`
 - 扩展系统设计：`Studio/PluginDocs.md`
-- 前端编码规范：`Studio/Fronted.md`

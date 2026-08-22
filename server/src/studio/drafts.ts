@@ -22,11 +22,11 @@ import {
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { config } from './config';
-import { assertDiskSpace } from './disk';
-import { logger } from './logger';
+import { config } from '../core/config';
+import { assertDiskSpace } from '../core/disk';
+import { logger } from '../core/logger';
 import { cloneTemplateSource, getTemplate } from './templates';
-import type { DraftMeta, ExtensionType, McServerInfo } from './types';
+import type { DraftMeta, ExtensionType, McServerInfo } from '../core/types';
 
 const MANIFEST_SCAFFOLD = `[manifest]
 schema_version = 1

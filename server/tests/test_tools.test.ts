@@ -9,8 +9,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { config } from '../src/config';
-import { readTestLog, TestToolsError } from '../src/test_tools';
+import { config } from '../src/core/config';
+import { readTestLog, TestToolsError } from '../src/studio/test_tools';
 
 const ORIG_DATA_DIR = config.data_dir;
 const tmpData = mkdtempSync(join(tmpdir(), 'studio-test-tools-'));
@@ -26,7 +26,7 @@ afterAll(() => {
 
 describe('扩展 ID 与部署目标约束', () => {
   test('PascalCase 扩展 ID 通过；非法 ID 抛错（与 drafts.validateExtensionId 一致）', async () => {
-    const { validateExtensionId } = await import('../src/drafts');
+    const { validateExtensionId } = await import('../src/studio/drafts');
     const drafts: Array<{ extension_id: string; status: string }> = [];
     expect(() => validateExtensionId('WeatherExt', drafts as never)).not.toThrow();
     expect(() => validateExtensionId('weather', drafts as never)).toThrow();

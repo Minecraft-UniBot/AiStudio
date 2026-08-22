@@ -6,8 +6,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { copyTree } from '../src/templates';
-import { rewriteClonedManifest, scaffoldDraftWorkspace, hasCodeType } from '../src/drafts';
+import { copyTree } from '../src/studio/templates';
+import { rewriteClonedManifest, scaffoldDraftWorkspace, hasCodeType } from '../src/studio/drafts';
 
 function tmpdirAt(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), `studio-${prefix}-`));

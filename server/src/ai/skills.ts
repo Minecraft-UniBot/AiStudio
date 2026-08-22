@@ -6,8 +6,8 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { resSrcDir } from './config';
-import type { ExtensionType } from './types';
+import { resSrcDir } from '../core/config';
+import type { ExtensionType } from '../core/types';
 
 const SKILLS_DIR = join(resSrcDir(), '..', 'skills');
 

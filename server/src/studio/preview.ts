@@ -8,10 +8,10 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { config, previewScriptPath, unibotEnvPython } from './config';
+import { config, previewScriptPath, unibotEnvPython } from '../core/config';
 import { draftWorkspace, readDraft } from './drafts';
 import { runProcess } from './unibot_env';
-import { logger } from './logger';
+import { logger } from '../core/logger';
 
 /** 预览相关错误 */
 export class PreviewError extends Error {

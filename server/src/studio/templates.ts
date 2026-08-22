@@ -24,10 +24,10 @@ import {
   statSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { config } from './config';
-import { assertDiskSpace } from './disk';
-import { logger } from './logger';
-import type { ExtensionType } from './types';
+import { config } from '../core/config';
+import { assertDiskSpace } from '../core/disk';
+import { logger } from '../core/logger';
+import type { ExtensionType } from '../core/types';
 import { runProcess } from './unibot_env';
 
 /** 模板信息（供新建草稿对话框与模板管理 API 展示） */

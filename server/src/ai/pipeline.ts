@@ -5,9 +5,9 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { draftWorkspace, readDraft, updateDraft, DraftError } from './drafts';
-import { opencode } from './opencode';
-import { logger } from './logger';
+import { draftWorkspace, readDraft, updateDraft, DraftError } from '../studio/drafts';
+import { opencode } from '../opencode/gateway';
+import { logger } from '../core/logger';
 import {
   config,
   docsAllowlist,
@@ -15,10 +15,10 @@ import {
   marketRegistryPath,
   unibotEnvPython,
   validationScriptPath,
-} from './config';
+} from '../core/config';
 import { renderPromptWithSecurity } from './prompts';
 import { renderSkillsSection } from './skills';
-import { renderMcServerContext } from './mc_server';
+import { renderMcServerContext } from '../studio/mc_server';
 
 /** 统一安全约束：路径边界、文档/市场白名单、网络规则、扩展 ID 一致 */
 export function buildSecurity(workspace: string, mcServerDir?: string | null): string {

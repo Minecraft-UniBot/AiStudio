@@ -8,11 +8,11 @@
  */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { config, resSrcDir } from './config';
+import { config, resSrcDir } from '../core/config';
 import { DraftError, computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
-import { logger } from './logger';
+import { logger } from '../core/logger';
 import { getUnibotEnvStatus, runProcess } from './unibot_env';
-import type { ValidationRun, ValidationStepId, ValidationStepResult } from './types';
+import type { ValidationRun, ValidationStepId, ValidationStepResult } from '../core/types';
 
 /** 同一草稿并发校验锁 */
 const VALIDATION_LOCKS = new Set<string>();

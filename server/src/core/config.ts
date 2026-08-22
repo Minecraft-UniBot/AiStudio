@@ -9,25 +9,26 @@ import { dirname, join, resolve } from 'node:path';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { StudioConfig } from './types';
+import { srcRootDir } from '../paths';
 
 const DEFAULT_DATA_DIR = join(homedir(), '.unibot-studio');
 
 /**
  * 资源目录基准（模拟 server/src 目录）：
- * - 常规运行：本文件所在目录（server/src），prompts / skills / validation 位于其上一级
+ * - 常规运行：src 根（paths.ts 所在目录），prompts / skills / validation 位于其上一级
  * - 单文件可执行版：启动器把内置资源解压到数据目录后，通过 UNIBOT_STUDIO_RES_DIR
  *   指向解压出的 src 基准目录，供重定位 prompts / skills / validation / docs。
  */
 export function resSrcDir(): string {
-  return process.env.UNIBOT_STUDIO_RES_DIR || import.meta.dir;
+  return process.env.UNIBOT_STUDIO_RES_DIR || srcRootDir();
 }
 
 /** 从仓库根目录探测 UniBot 目录（支持被软链或拷贝到任意位置） */
 function detectUnibotDir(): string {
   // 1. 环境变量显式指定
   if (process.env.UNIBOT_DIR) return process.env.UNIBOT_DIR;
-  // 2. 从当前文件位置向上找仓库（Studio/server/src -> Studio/server -> Studio -> 仓库根）
-  let dir = import.meta.dir;
+  // 2. 从 src 根向上找仓库（Studio/server/src -> Studio/server -> Studio -> 仓库根）
+  let dir = srcRootDir();
   for (let i = 0; i < 6; i++) {
     const parent = dirname(dir);
     if (parent === dir) break; // 已到文件系统根（跨平台：POSIX '/' 与 Windows 'C:\' 均在此停止）
@@ -198,7 +199,7 @@ export const config: StudioConfig = loadConfig();
  * 文档以副本形式存放在 Studio 内（server/prompts/docs/，由仓库脚本从
  * UniBot/Docs 与 UniBot/AGENT.md 同步），不依赖 unibot_dir 的绝对路径，
  * 避免 AI 因「目录外禁止读取」而去 web_fetch 搜索本项目内容。
- * 路径基于本文件位置解析（import.meta.dir -> server/prompts/docs），仅可读取、禁止修改。
+ * 路径基于 src 根解析（srcRootDir() -> server/prompts/docs），仅可读取、禁止修改。
  */
 
 /** 文档白名单绝对路径数组（供安全约束文本与权限自动放行共用） */
@@ -227,7 +228,7 @@ export function docsAllowlist(): string {
  * 自动省略，避免安全约束指向不存在的文件、提示词注入失效的市场路径。
  */
 export function marketAllowlistPaths(): string[] {
-  const repoRoot = join(import.meta.dir, '..', '..', '..');
+  const repoRoot = join(srcRootDir(), '..', '..', '..');
   const registry = join(repoRoot, 'Market', 'extensions.json');
   return existsSync(registry) ? [registry] : [];
 }

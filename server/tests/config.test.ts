@@ -4,7 +4,7 @@
 import { describe, expect, test, beforeAll } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
-import { docsAllowlistPaths, marketAllowlistPaths, marketRegistryPath } from '../src/config';
+import { docsAllowlistPaths, marketAllowlistPaths, marketRegistryPath } from '../src/core/config';
 
 describe('白名单路径', () => {
   test('文档白名单包含全部 6 个文档文件', () => {

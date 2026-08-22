@@ -51,8 +51,19 @@ export function normalize_part(part) {
       return { type: 'step-finish', reason: String(part.reason ?? '') }
     case 'subtask':
       return { type: 'subtask', agent: String(part.agent ?? ''), prompt: String(part.prompt ?? '') }
-    case 'retry':
-      return { type: 'retry', reason: String(part.reason ?? '') }
+    case 'retry': {
+      // RetryPart 字段跨版本有差异：SDK 1.18 为 { attempt, error: ApiError }，
+      // 历史版本为 { reason }。兼容两种取值，展示「第 N 次重试 + 原因」。
+      const err = part.error ?? {}
+      const reason =
+        String(part.reason ?? '') ||
+        String(err.message ?? err.errorMessage ?? err.name ?? '')
+      return {
+        type: 'retry',
+        reason,
+        attempt: Number(part.attempt ?? 0),
+      }
+    }
     case 'file':
       return { type: 'file', filename: String(part.filename ?? part.url ?? '') }
     default:

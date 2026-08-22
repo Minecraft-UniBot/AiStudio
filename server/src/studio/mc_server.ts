@@ -16,8 +16,8 @@ import { spawn } from 'node:child_process';
 import { inflateRawSync } from 'node:zlib';
 import { join, resolve } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { config, saveConfig } from './config';
-import type { McPackageEntry, McServerInfo } from './types';
+import { config, saveConfig } from '../core/config';
+import type { McPackageEntry, McServerInfo } from '../core/types';
 
 export class McServerError extends Error {
   constructor(message: string) {

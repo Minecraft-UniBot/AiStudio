@@ -4,7 +4,7 @@
  *
  * 一个二进制 = 后端（server 全部源码与依赖）+ 前端（web/dist）+ 内置资源
  * （prompts / skills / validation / plugins）。opencode 不内置（减小体积）：
- * 首次启动时由后端自动下载到 <数据目录>/opencode-bin/（见 server/src/opencode_download.ts）。
+ * 首次启动时由后端自动下载到 <数据目录>/opencode-bin/（见 server/src/opencode/download.ts）。
  * 运行即「初始化 + 启动服务器」，不需要用户做任何额外操作：
  *
  *   1. 解析数据目录（UNIBOT_STUDIO_DATA_DIR ?? ~/.unibot-studio）
@@ -17,7 +17,7 @@
  * 资源嵌入方式：bun build --compile --asset=<目录>（Bun >= 1.4 的 compile.assets），
  * 运行时位于 import.meta.dir 下的原始相对路径，可用 node:fs 读取。因为
  * validation 脚本要交给 python 子进程，必须先解压到真实文件系统，再让后端
- * 通过环境变量引用（见 server/src/config.ts 对 UNIBOT_STUDIO_RES_DIR 的说明）。
+ * 通过环境变量引用（见 server/src/core/config.ts 对 UNIBOT_STUDIO_RES_DIR 的说明）。
  *
  * 注意：本文件不能在模块顶层 import 任何 server 模块——env 必须在
  * 动态 import server 入口（../../server/src/index.ts）之前设置完毕，
@@ -88,7 +88,7 @@ function isStandalone(): boolean {
   return (Bun as unknown as { isStandaloneExecutable?: boolean }).isStandaloneExecutable === true;
 }
 
-/** 解析平台数据目录（与 server/src/config.ts 的默认值一致） */
+/** 解析平台数据目录（与 server/src/core/config.ts 的默认值一致） */
 function resolveDataDir(): string {
   return process.env.UNIBOT_STUDIO_DATA_DIR || join(homedir(), '.unibot-studio');
 }
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
       error(`UniBot 目录不存在：${dir}`);
       process.exit(1);
     }
-    // 与 server/src/config.ts setUnibotDir 的识别规则一致：Bot.py（源码根）或 Extensions/（运行根）
+    // 与 server/src/core/config.ts setUnibotDir 的识别规则一致：Bot.py（源码根）或 Extensions/（运行根）
     const looksLikeUnibot = existsSync(join(dir, 'Bot.py')) || existsSync(join(dir, 'Extensions'));
     if (!looksLikeUnibot) {
       error(`该目录看起来不像 UniBot：未找到 Bot.py 或 Extensions 目录（${dir}）`);
@@ -298,11 +298,11 @@ async function main(): Promise<void> {
     process.env.UNIBOT_STUDIO_RES_DIR = serverSrcDir;
     process.env.UNIBOT_STUDIO_STATIC_DIR = join(resourcesDir, 'web');
     // opencode 不再内置：首次启动时由后端自动下载到 <数据目录>/opencode-bin/（见
-    // server/src/opencode_download.ts），这里不注入 OPENCODE_BIN。
+    // server/src/opencode/download.ts），这里不注入 OPENCODE_BIN。
   }
 
   // ---- 4. 启动器自身日志落盘（<数据目录>/logs/studio.log），双击运行也能事后排查 ----
-  // 后端加载后由 server/src/logger.ts 的 enableFileLogging() 接管同一文件（index.ts 启动时
+  // 后端加载后由 server/src/core/logger.ts 的 enableFileLogging() 接管同一文件（index.ts 启动时
   // 开启），因此这里只负责后端加载之前的启动器消息，且不再拦截 console —— 避免日志重复写入。
   try {
     const logsDir = join(dataDir, 'logs');
@@ -325,8 +325,8 @@ async function main(): Promise<void> {
   // ---- 6. 就绪提示（访问地址带登录 token，统一走后端 logger 输出；不再自动打开浏览器） ----
   // 动态 import：env 就绪后再加载 server 模块（本文件不能在模块顶层 import server 模块）——
   // 此时 index.ts 已完成启动（enableFileLogging 已开启），logger 与 index.ts 写入同一日志文件。
-  const { issueToken } = await import('../../server/src/auth.ts');
-  const { logger } = await import('../../server/src/logger.ts');
+  const { issueToken } = await import('../../server/src/core/auth.ts');
+  const { logger } = await import('../../server/src/core/logger.ts');
   const baseUrl = `http://127.0.0.1:${port}/`;
   await waitForHttp(baseUrl, 30_000);
   logger.info('server', `已就绪：${baseUrl}?token=${issueToken()}（Ctrl+C 停止）`);

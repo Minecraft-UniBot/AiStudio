@@ -8,7 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McServerError, renderMcServerContext, scanMcServer } from '../src/mc_server';
+import { McServerError, renderMcServerContext, scanMcServer } from '../src/studio/mc_server';
 
 /** 构造最小合法 ZIP：stored 条目 + 中央目录 + EOCD（CRC 置 0，读取器不做完整性校验） */
 function makeJar(entries: Record<string, string>): Buffer {

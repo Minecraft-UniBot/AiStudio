@@ -2,7 +2,7 @@
  * 提示词模板测试：front-matter 解析、占位符渲染、残留清理、版本化。
  */
 import { describe, expect, test } from 'bun:test';
-import { renderPrompt, listPrompts, getPrompt } from '../src/prompts';
+import { renderPrompt, listPrompts, getPrompt } from '../src/ai/prompts';
 
 describe('prompts 渲染', () => {
   test('模板存在（system / planning / scaffold / summary）', () => {

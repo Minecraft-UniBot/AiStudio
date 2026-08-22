@@ -312,7 +312,9 @@ function todo_priority_class(priority) {
           </div>
           <div v-if="part.type === 'retry'" class="step-line warning-text">
             <Icon :icon="partIcon('retry')" width="13" />
-            <span>重试：{{ part.reason }}</span>
+            <span>
+              模型请求失败<template v-if="part.attempt">（第 {{ part.attempt }} 次尝试）</template>，自动重试中{{ part.reason ? `：${part.reason}` : '' }}
+            </span>
           </div>
           <div v-if="part.type === 'file'" class="step-line">
             <Icon :icon="partIcon('file')" width="13" />

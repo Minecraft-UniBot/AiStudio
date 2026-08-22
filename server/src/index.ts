@@ -6,12 +6,12 @@
  */
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { ensureDataDirs, saveConfig, setUnibotDir, docsAllowlist, marketAllowlist, marketRegistryPath } from './config';
-import { config } from './config';
-import { issueToken, verifyToken } from './auth';
-import { opencode, resolvePermissionTarget, normalizeProviders } from './opencode';
-import { enableFileLogging, logger } from './logger';
-import { trackSession, untrackDraft } from './sessions';
+import { ensureDataDirs, saveConfig, setUnibotDir, docsAllowlist, marketAllowlist, marketRegistryPath } from './core/config';
+import { config } from './core/config';
+import { issueToken, verifyToken } from './core/auth';
+import { opencode, resolvePermissionTarget, normalizeProviders } from './opencode/gateway';
+import { enableFileLogging, logger } from './core/logger';
+import { trackSession, untrackDraft } from './studio/sessions';
 import {
   assertPromptable,
   computeRevision,
@@ -28,14 +28,14 @@ import {
   resolveDraftPath,
   sanitizeTypes,
   updateDraft,
-} from './drafts';
-import { publishDraft, PublishError } from './publishing';
-import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './events';
-import { getTools, updateTools } from './tools';
-import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './prompts';
-import { buildSecurity } from './pipeline';
-import { ensureUnibotEnv, getUnibotEnvStatus, syncUnibotEnv } from './unibot_env';
-import { runValidation, validationFixIssues } from './validation';
+} from './studio/drafts';
+import { publishDraft, PublishError } from './studio/publishing';
+import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './opencode/events';
+import { getTools, updateTools } from './ai/tools';
+import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './ai/prompts';
+import { buildSecurity } from './ai/pipeline';
+import { ensureUnibotEnv, getUnibotEnvStatus, syncUnibotEnv } from './studio/unibot_env';
+import { runValidation, validationFixIssues } from './studio/validation';
 import {
   TestToolsError,
   deployToTestEnv,
@@ -45,10 +45,10 @@ import {
   testEnvOverview,
   undeployFromTestEnv,
   validateDraft,
-} from './test_tools';
-import { assertFeatureEnabled } from './registry';
-import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './templates';
-import { PreviewError, listTemplateNames, renderTemplatePreview } from './preview';
+} from './studio/test_tools';
+import { assertFeatureEnabled } from './ai/registry';
+import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './studio/templates';
+import { PreviewError, listTemplateNames, renderTemplatePreview } from './studio/preview';
 import {
   McServerError,
   clearMcServerDir,
@@ -57,8 +57,8 @@ import {
   pickMcServerDir,
   renderMcServerContext,
   setMcServerDir,
-} from './mc_server';
-import type { DraftMeta } from './types';
+} from './studio/mc_server';
+import type { DraftMeta } from './core/types';
 
 // ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效；签发/校验见 auth.ts） =====
 
@@ -477,6 +477,8 @@ async function handleRequest(req: Request): Promise<Response> {
               // 新消息会触发 opencode 的 revert cleanup（物理删除被回退的消息），
               // 因此清除暂存过滤标记，避免把新消息也过滤掉。
               ...(draft.revert_message_id ? { revert_message_id: null } : {}),
+              // 新一轮生成开始：清掉上一轮的瞬时错误（横幅不再残留）
+              ...(draft.error ? { error: undefined } : {}),
             });
             broadcast({ type: 'draft.updated', draft_id: draftId, status: resumeStatus });
             try {
@@ -672,7 +674,7 @@ async function handleRequest(req: Request): Promise<Response> {
               problemSheet +
               '\n\n修复完成后，用测试工具（unibot_deploy + unibot_run_tests）在测试环境验证，' +
               '并等待系统自动重新校验。';
-            updateDraft(draftId, { status: 'coding', phase: 'coding' });
+            updateDraft(draftId, { status: 'coding', phase: 'coding', error: undefined });
             broadcast({ type: 'draft.updated', draft_id: draftId, status: 'coding' });
             try {
               await client.session.promptAsync({
@@ -963,6 +965,10 @@ function serveStatic(req: Request, url: URL): Response | null {
 const server = Bun.serve({
   hostname: config.host,
   port: config.port,
+  // 连接空闲超时（秒）：Bun 默认 10s 会把长时间静默的 WebSocket 掐断
+  //（AI 深度思考 / 模型重试期间事件流可能数十秒无消息），显式调大；
+  // 前端另有 20s 应用层心跳兜底（见 web/src/utils/api.js connectEvents）
+  idleTimeout: 120,
   fetch: async (req, server) => {
     const url = new URL(req.url);
     if (url.pathname === '/api/studio/events') {

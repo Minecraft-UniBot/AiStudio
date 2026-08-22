@@ -32,6 +32,9 @@ export const useStudioStore = defineStore('studio', () => {
   const mcServer = ref(null)
   const connected = ref(false)
   const error = ref('')
+  // 模型自动重试状态（session.status retry 事件）：生成期间流式请求失败时
+  // 后端会退避重试，界面据此展示「正在重试」横幅，而不是静默卡住
+  const sessionRetry = ref(null)
   const pendingPermissions = ref([])
   const pendingQuestions = ref([])
 
@@ -135,6 +138,8 @@ export const useStudioStore = defineStore('studio', () => {
       'messages',
       () => api(`/drafts/${id}/messages`),
       (data) => {
+        // 过期草稿守卫：切换草稿后，前一个草稿的延迟刷新不得覆盖当前消息列表
+        if (currentDraft.value?.id !== id) return
         messages.value = data
       },
     )
@@ -304,6 +309,7 @@ export const useStudioStore = defineStore('studio', () => {
   function resetPending() {
     pendingPermissions.value = []
     pendingQuestions.value = []
+    sessionRetry.value = null
   }
 
   function pushPendingPermission(permission) {
@@ -344,6 +350,7 @@ export const useStudioStore = defineStore('studio', () => {
     templatesError,
     connected,
     error,
+    sessionRetry,
     pendingPermissions,
     pendingQuestions,
     opencodeAvailable,

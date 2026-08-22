@@ -53,6 +53,22 @@ export function connectEvents(onEvent, { onOpen, onClose, onReconnect } = {}) {
   let ws = null
   let retry = 0
   let closed = false
+  // 应用层心跳：AI 深度思考 / 模型重试期间事件流可能数十秒无消息，
+  // 定期 ping 保持连接活跃（服务端回 pong），避免被空闲超时或中间设备掐断
+  let heartbeat = null
+
+  const startHeartbeat = () => {
+    stopHeartbeat()
+    heartbeat = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping')
+    }, 20000)
+  }
+  const stopHeartbeat = () => {
+    if (heartbeat) {
+      clearInterval(heartbeat)
+      heartbeat = null
+    }
+  }
 
   const connect = () => {
     if (closed) return
@@ -60,6 +76,7 @@ export function connectEvents(onEvent, { onOpen, onClose, onReconnect } = {}) {
 
     ws.onopen = () => {
       retry = 0
+      startHeartbeat()
       onOpen?.()
       // 重连成功后触发 REST 恢复（首次连接也触发，保证状态完整）
       if (retry === 0) onReconnect?.()
@@ -69,10 +86,11 @@ export function connectEvents(onEvent, { onOpen, onClose, onReconnect } = {}) {
         const event = JSON.parse(ev.data)
         onEvent(event)
       } catch {
-        // 忽略无法解析的消息
+        // 忽略无法解析的消息（心跳 pong 等）
       }
     }
     ws.onclose = () => {
+      stopHeartbeat()
       onClose?.()
       if (!closed) {
         retry = Math.min(retry + 1, 5)
@@ -85,6 +103,7 @@ export function connectEvents(onEvent, { onOpen, onClose, onReconnect } = {}) {
 
   return () => {
     closed = true
+    stopHeartbeat()
     ws?.close()
   }
 }

@@ -46,15 +46,30 @@ export function use_studio_events() {
     if (isCurrent) {
       switch (event.type) {
         case 'session.status':
+          // 模型流式失败 → opencode 退避自动重试：展示「正在重试」横幅，
+          // busy/idle（新一轮开始或本轮结束）时清除
+          if (event.status === 'retry') {
+            store.sessionRetry = {
+              attempt: event.retry?.attempt ?? 0,
+              message: event.retry?.message ?? '',
+            }
+          } else {
+            store.sessionRetry = null
+          }
+          store.refreshCurrent(event.draft_id)
+          break
         case 'session.idle':
         case 'session.error':
-        case 'draft.updated':
-        case 'draft.published':
+          store.sessionRetry = null
           store.refreshCurrent(event.draft_id)
           // 会话结束 / 状态流转后文件可能已变化（如编码完成、审查后校验）
           refresh_files(event.draft_id)
           // 终态事件：立即拉一次消息，确保流式阶段最后一段内容落在最新快照上
           schedule_messages_refresh(event.draft_id, true)
+          break
+        case 'draft.updated':
+        case 'draft.published':
+          store.refreshCurrent(event.draft_id)
           break
         case 'message.updated':
         case 'message.part.updated':

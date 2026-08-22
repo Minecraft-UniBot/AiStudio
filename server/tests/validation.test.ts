@@ -4,8 +4,8 @@
  * - 环境未就绪只产生 env 失败步骤（非代码问题，AI 不可修复）
  */
 import { describe, expect, test } from 'bun:test';
-import { validationFixIssues } from '../src/validation';
-import type { ValidationRun } from '../src/types';
+import { validationFixIssues } from '../src/studio/validation';
+import type { ValidationRun } from '../src/core/types';
 
 function run(steps: ValidationRun['steps']): ValidationRun {
   return {

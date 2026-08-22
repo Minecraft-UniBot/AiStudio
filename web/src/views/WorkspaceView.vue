@@ -362,6 +362,17 @@ onUnmounted(() => {
       <span>{{ draft.error }}</span>
     </div>
 
+    <!-- 模型自动重试横幅：上游模型流式失败时 opencode 会退避重试，
+         明确提示「正在重试」而不是让界面静默卡住（输出停止排查的可见性修复） -->
+    <div v-if="store.sessionRetry" class="workspace-banner warning">
+      <Icon icon="lucide:refresh-cw" width="14" class="spin" />
+      <span>
+        模型请求失败，正在自动重试<template v-if="store.sessionRetry.attempt">（第 {{ store.sessionRetry.attempt }} 次）</template>…
+        <template v-if="store.sessionRetry.message">{{ store.sessionRetry.message }}</template>
+        如持续失败，可停止生成后换一个模型重试。
+      </span>
+    </div>
+
     <!-- 手机端 Tab 切换（Plan 3.2） -->
     <nav class="mobile-tabs">
       <button
@@ -554,6 +565,25 @@ onUnmounted(() => {
   color: var(--danger);
   background: var(--danger-soft);
   border-bottom: 1px solid #fecaca;
+}
+
+.workspace-banner.warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-bottom: 1px solid #fde68a;
+}
+
+.workspace-banner.warning .spin {
+  animation: banner-spin 1.6s linear infinite;
+}
+
+@keyframes banner-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .workspace-banner :deep(svg) {

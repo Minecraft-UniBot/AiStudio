@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { config, resSrcDir } from './config';
+import { config, resSrcDir } from '../core/config';
 
 const PROMPTS_DIR = join(resSrcDir(), '..', 'prompts');
 

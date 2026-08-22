@@ -144,9 +144,19 @@ export interface DraftMeta {
 /** 权限回复（对应 OpenCode permission.replied） */
 export type PermissionDecision = 'once' | 'always' | 'reject';
 
+/** 会话重试细节（opencode SessionStatus.retry：模型流式失败后的自动退避重试） */
+export interface SessionRetryDetail {
+  /** 第几次尝试（从 1 起） */
+  attempt: number;
+  /** 失败原因（如 AI_APICallError: Upstream request failed） */
+  message: string;
+  /** 下次重试时间（epoch 毫秒；0 表示未知） */
+  next: number;
+}
+
 /** 事件载荷（后端归一化后推送给前端） */
 export type StudioEvent =
-  | { type: 'session.status'; draft_id: string; status: string }
+  | { type: 'session.status'; draft_id: string; status: string; retry?: SessionRetryDetail }
   | { type: 'session.idle'; draft_id: string }
   | { type: 'session.error'; draft_id: string; error: string }
   | { type: 'message.updated'; draft_id: string; message: unknown }

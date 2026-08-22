@@ -11,11 +11,11 @@
  */
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { config, validationScriptPath, unibotEnvPython } from './config';
+import { config, validationScriptPath, unibotEnvPython } from '../core/config';
 import { draftWorkspace, readDraft } from './drafts';
-import { logger } from './logger';
+import { logger } from '../core/logger';
 import { getUnibotEnvStatus, runProcess } from './unibot_env';
-import type { ValidationRun } from './types';
+import type { ValidationRun } from '../core/types';
 
 export class TestToolsError extends Error {
   constructor(

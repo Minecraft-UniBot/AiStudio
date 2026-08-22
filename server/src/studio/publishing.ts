@@ -20,11 +20,11 @@ import {
   rmSync,
 } from 'node:fs';
 import { basename, join, relative } from 'node:path';
-import { config } from './config';
-import { assertDiskSpace } from './disk';
-import { logger } from './logger';
+import { config } from '../core/config';
+import { assertDiskSpace } from '../core/disk';
+import { logger } from '../core/logger';
 import { computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
-import type { PublishRecord } from './types';
+import type { PublishRecord } from '../core/types';
 
 export class PublishError extends Error {
   constructor(

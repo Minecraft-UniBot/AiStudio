@@ -14,8 +14,8 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { config } from './config';
-import { logger } from './logger';
+import { config } from '../core/config';
+import { logger } from '../core/logger';
 
 const BIN_NAME = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
 /** 版本标记文件名：内容为下载的 opencode 版本，用于判断是否需要重新下载 */

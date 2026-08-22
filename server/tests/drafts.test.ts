@@ -2,8 +2,8 @@
  * 草稿服务测试：扩展 ID 校验、类型过滤、状态守卫。
  */
 import { describe, expect, test } from 'bun:test';
-import { DraftError, sanitizeTypes, assertPromptable } from '../src/drafts';
-import type { DraftMeta } from '../src/types';
+import { DraftError, sanitizeTypes, assertPromptable } from '../src/studio/drafts';
+import type { DraftMeta } from '../src/core/types';
 
 function makeDraft(partial: Partial<DraftMeta>): DraftMeta {
   return {

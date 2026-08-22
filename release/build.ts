@@ -5,7 +5,7 @@
  * 产物：一个自包含二进制（含后端、前端、prompts/skills/validation/plugins），
  * 运行即启动服务器，无需安装任何依赖（详见 release/README.md）。
  * opencode 不内置：首次启动时由后端自动下载到数据目录（减小安装包体积，
- * 见 server/src/opencode_download.ts）。
+ * 见 server/src/opencode/download.ts）。
  *
  * 用法：
  *   bun release/build.ts [选项]
@@ -140,7 +140,7 @@ if (FORCE_WEB || !existsSync(distIndex) || srcNewest > statSync(distIndex).mtime
 
 // ---- 3. 预打包测试工具插件 ----
 // 单文件版运行时没有 node_modules：server 在 opencode 启动前的 Bun.build
-// 无法解析 @opencode-ai/plugin / zod（见 server/src/opencode.ts syncPlugins 的
+// 无法解析 @opencode-ai/plugin / zod（见 server/src/opencode/gateway.ts syncPlugins 的
 // "预打包" 分支），因此打包期就把它打成自包含 JS，随 exe 嵌入。
 const pluginOut = join(RELEASE_DIR, "vendor", "plugin", "unibot-tools.js");
 console.log("==> 预打包测试工具插件（unibot-tools.js）…");

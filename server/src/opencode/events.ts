@@ -12,14 +12,14 @@
 import type { ServerWebSocket } from 'bun';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { opencode } from './opencode';
-import { readDraft, updateDraft, draftWorkspace, listDrafts } from './drafts';
-import { runValidation } from './validation';
-import { startCoding } from './pipeline';
-import { draftIdForSession, getWorkspaces } from './sessions';
-import { logger } from './logger';
-import { docsAllowlistPaths, marketAllowlistPaths, unibotEnvPython, validationScriptPath } from './config';
-import type { PermissionRequest, QuestionRequest, StudioEvent } from './types';
+import { opencode } from './gateway';
+import { readDraft, updateDraft, draftWorkspace, listDrafts } from '../studio/drafts';
+import { runValidation } from '../studio/validation';
+import { startCoding } from '../ai/pipeline';
+import { draftIdForSession, getDraftSessionIds, getWorkspaces } from '../studio/sessions';
+import { logger } from '../core/logger';
+import { docsAllowlistPaths, marketAllowlistPaths, unibotEnvPython, validationScriptPath } from '../core/config';
+import type { PermissionRequest, QuestionRequest, StudioEvent } from '../core/types';
 
 const WS_CLIENTS = new Set<ServerWebSocket<unknown>>();
 
@@ -189,10 +189,21 @@ function normalize(raw: Record<string, unknown>): StudioEvent | null {
         typeof statusRaw === 'string'
           ? statusRaw
           : String((statusRaw as Record<string, unknown> | undefined)?.type ?? '');
+      // retry 携带重试细节（SDK SessionStatus.retry: { attempt, message, next }），
+      // 原样透传给前端展示「模型请求失败，正在自动重试」，避免生成期间静默卡住
+      const retryDetail =
+        statusType === 'retry' && typeof statusRaw === 'object' && statusRaw
+          ? {
+              attempt: Number((statusRaw as Record<string, unknown>).attempt ?? 0),
+              message: String((statusRaw as Record<string, unknown>).message ?? ''),
+              next: Number((statusRaw as Record<string, unknown>).next ?? 0),
+            }
+          : undefined;
       return {
         ...base,
         type: 'session.status',
         status: statusType,
+        ...(retryDetail ? { retry: retryDetail } : {}),
       };
     }
     case 'session.idle':
@@ -358,7 +369,9 @@ async function settleCodingAndValidate(draftId: string): Promise<void> {
     const run = await runValidation(draftId);
     broadcast({ type: 'validation.updated', draft_id: draftId, run });
     if (run.status === 'passed') {
-      updateDraft(draftId, { status: 'ready' });
+      // 校验通过：清除生成期间记录的瞬时错误（如上游模型流式失败后自动恢复），
+      // 避免横幅残留已不存在的错误误导用户
+      updateDraft(draftId, { status: 'ready', error: undefined });
       logger.info('draft', '编码完成，机械校验通过，草稿进入 ready', {
         draft_id: draftId,
         extension_id: readDraft(draftId).extension_id,
@@ -451,6 +464,21 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
     } catch {
       return; // 草稿已删除
     }
+    // 规划/编码期间的会话错误（如上游模型流式失败、重试耗尽）：
+    // 只记录错误文本供前端横幅展示，保留运行状态与 phase——opencode 随后必然下发
+    // session.idle，若此处把 status 改成 error 会破坏 idle 结算判断（coding→机械校验、
+    // planning→编码），草稿会永久卡在「异常」而无法自动流转。
+    if (draft.status === 'planning' || draft.status === 'coding') {
+      logger.warn('draft', `会话错误（保持运行状态，等待空闲结算）`, {
+        draft_id: draftId,
+        extension_id: draft.extension_id,
+        status: draft.status,
+        error: ev.error,
+      });
+      updateDraft(draftId, { error: ev.error });
+      broadcast({ type: 'draft.updated', draft_id: draftId, status: draft.status });
+      return;
+    }
     logger.warn('draft', `会话错误，草稿置为 error`, { draft_id: draftId, extension_id: draft.extension_id, error: ev.error });
     updateDraft(draftId, { status: 'error', phase: null, error: ev.error });
     broadcast({ type: 'draft.updated', draft_id: draftId, status: 'error' });
@@ -459,12 +487,23 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
 
   const isIdle = ev.type === 'session.idle' || (ev.type === 'session.status' && ev.status === 'idle');
   if (!isIdle) {
-    // 新一轮运行开始（busy）→ 清除旧的闲置/结算标记，避免后续真实完成被误判为重复事件，
-    // 或被结算节流误拦（新一轮运行不应沿用上一轮的节流时间戳）
+    // 新一轮运行开始（busy）→ 清除旧的闲置/结算标记与上一轮的错误横幅，
+    // 避免后续真实完成被误判为重复事件，或残留过期错误提示误导用户
     if (ev.type === 'session.status' && ev.status === 'busy') {
       const key = `${draftId}:${sessionId}`;
       LAST_IDLE.delete(key);
       LAST_SETTLED.delete(key);
+      const current = (() => {
+        try {
+          return readDraft(draftId);
+        } catch {
+          return null;
+        }
+      })();
+      if (current?.error) {
+        updateDraft(draftId, { error: undefined });
+        broadcast({ type: 'draft.updated', draft_id: draftId, status: current.status });
+      }
     }
     return;
   }
@@ -495,6 +534,8 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
       });
       try {
         await startCoding(draftId);
+        // 成功进入编码：清除规划期间记录的瞬时错误
+        updateDraft(draftId, { error: undefined });
         broadcast({ type: 'draft.updated', draft_id: draftId, status: 'coding' });
       } catch (e) {
         logger.error('draft', '进入编码阶段失败', { draft_id: draftId, error: (e as Error).message });
@@ -521,6 +562,9 @@ async function settleSessionState(draftId: string, sessionId: string, ev: Studio
 
 /** workspace 路径 -> AbortController（用于关闭订阅） */
 const SUBSCRIPTIONS = new Map<string, AbortController>();
+
+/** SSE 意外断开后的快速重订延迟（毫秒）：远小于协调循环的 2s 轮询，减少事件丢失窗口 */
+const SSE_RESUBSCRIBE_DELAY_MS = 500;
 
 async function subscribeWorkspace(workspace: string) {
   if (SUBSCRIPTIONS.has(workspace)) return;
@@ -576,6 +620,14 @@ async function subscribeWorkspace(workspace: string) {
       // 仅当仍是当前控制器时才清理，避免误删新订阅
       if (SUBSCRIPTIONS.get(workspace) === ac) {
         SUBSCRIPTIONS.delete(workspace);
+        // 非主动关闭（草稿删除）时的意外断开：立即安排快速重订，
+        // 不等协调循环下一轮（2s），缩小流式事件丢失窗口。
+        // opencode 进程重启期间会失败，由协调循环兜底持续重试。
+        if (!ac.signal.aborted) {
+          setTimeout(() => {
+            if (getWorkspaces().has(workspace)) void subscribeWorkspace(workspace);
+          }, SSE_RESUBSCRIBE_DELAY_MS);
+        }
       }
     }
   };
@@ -589,12 +641,21 @@ export async function startEventConsumer() {
 
   while (true) {
     const wanted = getWorkspaces();
-    // 关闭已删除草稿的订阅
+    // 关闭已删除草稿的订阅，并清理其闲置去重/结算节流标记（防内存缓慢增长）
     for (const [workspace, ac] of SUBSCRIPTIONS) {
       if (!wanted.has(workspace)) {
         ac.abort();
         SUBSCRIPTIONS.delete(workspace);
         logger.info('events', '关闭 SSE 订阅', { workspace });
+      }
+    }
+    // 清理已删除草稿的闲置去重/结算节流标记（key 形如 "<draftId>:<sessionId>"）：
+    // 草稿删除后其会话登记被移除，按此判定 key 是否已失效，防止 Map 无限增长
+    const live_draft_ids = new Set(getDraftSessionIds().keys());
+    for (const key of [...LAST_IDLE.keys()]) {
+      if (!live_draft_ids.has(key.split(':')[0] ?? '')) {
+        LAST_IDLE.delete(key);
+        LAST_SETTLED.delete(key);
       }
     }
     // 为新工作区建立订阅

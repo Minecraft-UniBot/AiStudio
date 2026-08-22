@@ -8,8 +8,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { config } from './config';
-import type { ToolEntry } from './types';
+import { config } from '../core/config';
+import type { ToolEntry } from '../core/types';
 
 const DEFAULT_TOOLS: ToolEntry[] = [
   {

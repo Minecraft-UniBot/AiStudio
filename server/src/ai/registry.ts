@@ -3,7 +3,7 @@
  * 平台功能按模块注册，每个模块可独立启用/停用；前端根据开关隐藏入口与 Tab，
  * 后端拒绝未启用模块的 API。新增功能 = 新增模块目录 + 注册表登记 + 一个开关。
  */
-import { config } from './config';
+import { config } from '../core/config';
 
 export interface FeatureModule {
   id: keyof typeof config.features;
