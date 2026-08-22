@@ -72,7 +72,8 @@ bun release/build.ts            # 一键打包（要求 Bun >= 1.4；产物在 r
 - 打包内容：server bundle + `web/dist` + `prompts/skills/validation/plugins`（opencode 首次启动自动下载）
 - 运行行为：首次运行解压内置资源（`~/.unibot-studio/resources`，带版本标记自动更新）并下载 opencode，
   默认端口 9876 被占用时自动换空闲端口，启动后打印访问地址与口令并打开浏览器
-- 命令行：`--version` / `--help`；环境变量同下方「配置」表（另有 `UNIBOT_STUDIO_NO_BROWSER=1` 关闭自动开浏览器）
+- 命令行：`--version` / `--help` / `--data <目录>`（指定数据目录，优先级高于 `UNIBOT_STUDIO_DATA_DIR`）；
+  环境变量同下方「配置」表（另有 `UNIBOT_STUDIO_NO_BROWSER=1` 关闭自动开浏览器）
 - 发布工作流：`.github/workflows/release.yml`（手动触发，或推送 tag `v*` 自动构建并创建 Release 草稿），
   产物为各平台自包含可执行文件：`unibot-studio-{macos-arm64,macos-x64,windows-x64,linux-x64}[.exe]`
 

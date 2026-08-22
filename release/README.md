@@ -23,6 +23,7 @@ bun release/build.ts [--outdir release/artifacts] [--name unibot-studio] [--forc
 
 ```bash
 ./release/artifacts/unibot-studio        # 双击 / 直接运行
+unibot-studio --data <目录>              # 指定数据目录（如 unibot-studio --data ./studio-data）
 unibot-studio --version                  # 查看版本
 unibot-studio --help                     # 查看用法与环境变量
 ```

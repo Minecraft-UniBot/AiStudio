@@ -36,7 +36,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { APP_VERSION } from './version.generated';
 
 // ---- 常量 ----
@@ -52,12 +52,35 @@ const VERSION_MARKER = '.studio-version';
 
 // ---- 工具函数 ----
 
+/** 日志文件路径（main 中初始化；为空时仅打印控制台） */
+let logFile = '';
+
+/** 追加一行到日志文件（失败静默：日志落盘不影响运行） */
+function tee(line: string) {
+  if (!logFile) return;
+  try {
+    writeFileSync(logFile, line + '\n', { flag: 'a' });
+  } catch {
+    // 忽略写日志失败
+  }
+}
+
 function log(message: string) {
-  console.log(`[studio] ${message}`);
+  const line = `[studio] ${message}`;
+  console.log(line);
+  tee(line);
 }
 
 function warn(message: string) {
-  console.warn(`[studio] ${message}`);
+  const line = `[studio] ${message}`;
+  console.warn(line);
+  tee(line);
+}
+
+function error(message: string) {
+  const line = `[studio] ${message}`;
+  console.error(line);
+  tee(line);
 }
 
 /** 判断当前进程是否是编译后的独立可执行文件 */
@@ -146,6 +169,23 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
 
 // ---- 主流程 ----
 
+/** 解析 --data <目录> / --data=<目录> 参数（指定数据目录，优先级高于环境变量） */
+function parseDataArg(args: string[]): { value?: string; error?: string } {
+  const eq = args.find((a) => a.startsWith('--data='));
+  if (eq) {
+    const value = eq.slice('--data='.length);
+    if (!value) return { error: '--data 参数不能为空' };
+    return { value };
+  }
+  const idx = args.indexOf('--data');
+  if (idx !== -1) {
+    const value = args[idx + 1];
+    if (!value || value.startsWith('--')) return { error: '--data 后缺少目录参数' };
+    return { value };
+  }
+  return {};
+}
+
 async function main(): Promise<void> {
   // 命令行参数
   const args = process.argv.slice(2);
@@ -156,9 +196,12 @@ async function main(): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`UniBot Extension Studio ${APP_VERSION}`);
     console.log('');
-    console.log('用法：unibot-studio [--version] [--help]');
+    console.log('用法：unibot-studio [--version] [--help] [--data <目录>]');
     console.log('');
     console.log('运行即启动本地服务器（默认 http://127.0.0.1:9876），自动打开浏览器。');
+    console.log('选项：');
+    console.log('  --data <目录>      指定数据目录（默认 ~/.unibot-studio，等价于环境变量');
+    console.log('                     UNIBOT_STUDIO_DATA_DIR，且优先级更高）');
     console.log('环境变量：');
     console.log('  UNIBOT_STUDIO_PORT       端口（默认 9876，被占用自动换空闲端口）');
     console.log('  UNIBOT_STUDIO_HOST       监听地址（默认 127.0.0.1）');
@@ -166,6 +209,17 @@ async function main(): Promise<void> {
     console.log('  UNIBOT_STUDIO_PASSWORD   访问口令（默认首次启动自动生成）');
     console.log('  UNIBOT_STUDIO_NO_BROWSER 设为 1 时不自动打开浏览器');
     return;
+  }
+
+  // --data <目录>：写入环境变量（CLI 优先级 > 环境变量 > 默认值）
+  const dataArg = parseDataArg(args);
+  if (dataArg.error) {
+    error(dataArg.error);
+    error('用法：unibot-studio --data <目录>（或 --data=<目录>）');
+    process.exit(1);
+  }
+  if (dataArg.value) {
+    process.env.UNIBOT_STUDIO_DATA_DIR = resolve(dataArg.value);
   }
 
   // ---- 1. 数据目录与端口 ----
@@ -234,36 +288,13 @@ async function main(): Promise<void> {
     // server/src/opencode_download.ts），这里不注入 OPENCODE_BIN。
   }
 
-  // ---- 4. 把日志同时落盘（<数据目录>/logs/studio.log），双击运行也能事后排查 ----
+  // ---- 4. 启动器自身日志落盘（<数据目录>/logs/studio.log），双击运行也能事后排查 ----
+  // 后端加载后由 server/src/logger.ts 的 enableFileLogging() 接管同一文件（index.ts 启动时
+  // 开启），因此这里只负责后端加载之前的启动器消息，且不再拦截 console —— 避免日志重复写入。
   try {
     const logsDir = join(dataDir, 'logs');
     mkdirSync(logsDir, { recursive: true });
-    const logFile = join(logsDir, 'studio.log');
-    const tee = (line: string) => {
-      try {
-        writeFileSync(logFile, line + '\n', { flag: 'a' });
-      } catch {
-        // 忽略写日志失败
-      }
-    };
-    const origLog = console.log;
-    const origError = console.error;
-    const origWarn = console.warn;
-    console.log = (...xs: unknown[]) => {
-      const line = xs.map(String).join(' ');
-      origLog(...xs);
-      tee(line);
-    };
-    console.warn = (...xs: unknown[]) => {
-      const line = xs.map(String).join(' ');
-      origWarn(...xs);
-      tee(line);
-    };
-    console.error = (...xs: unknown[]) => {
-      const line = xs.map(String).join(' ');
-      origError(...xs);
-      tee(line);
-    };
+    logFile = join(logsDir, 'studio.log');
   } catch {
     // 日志落盘失败不影响启动
   }
@@ -273,8 +304,8 @@ async function main(): Promise<void> {
   try {
     await import('../../server/src/index.ts');
   } catch (e) {
-    console.error(`启动失败：${(e as Error).message}`);
-    console.error(`详细日志：${join(dataDir, 'logs', 'studio.log')}`);
+    error(`启动失败：${(e as Error).message}`);
+    error(`详细日志：${join(dataDir, 'logs', 'studio.log')}`);
     process.exit(1);
   }
 
