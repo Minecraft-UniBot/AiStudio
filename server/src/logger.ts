@@ -160,7 +160,7 @@ function formatLine(
   if (opts.color) {
     line =
       `${ANSI.gray}${ts}${ANSI.reset} ` +
-      `${LEVEL_STYLE[level]}${tag}${ANSI.reset} ` +
+      `${LEVEL_STYLE[level]}${tag}${ANSI.reset} | ` +
       `${ANSI.dim}${scope}${ANSI.reset} ` +
       `${message}` +
       (fields ? `${ANSI.gray}${fields}${ANSI.reset}` : '');

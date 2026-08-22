@@ -197,7 +197,7 @@ AI 用工具自测并确认通过后，会话空闲时系统自动运行机械�
 jinja2 与受限子进程）把草稿 `Templates/` 下的某个模板渲染成完整 HTML（含 `Base.css` 与模板自身
 CSS，二者同为 Jinja2 一起渲染），前端用 `iframe srcdoc` 实时展示，并按容器宽度用 CSS `transform: scale` 等比缩放（读 iframe 内容实际尺寸后补偿画布大小，超出部分由外层滚动）。预览内置占位测试数据
 （`Server / List / Luck / About / Bound / Help` 各模板的字段，见 `server/validation/preview_template.py`），
-文件变化后防抖重渲染，模板名可切换。实现：`server/src/preview.ts`（编排）+ `server/validation/preview_template.py`（渲染，含最小 Jinja 全局函数兜底，避免 `random`/`resource_url` 等报错）。仅渲染草稿工作区内的 `Templates` 目录，不写任何文件。
+文件变化后防抖重渲染，模板名可切换。实现：`server/src/preview.ts`（编排）+ `server/validation/preview_template.py`（渲染）。资源解析与 UniBot Renderer 语义一致：`config.*` 取草稿 `Extension.toml` 的 `[template.config_schema]` 默认值（含 `{{ }}` 字段预渲染，如 `background = "{{ random(...) }}"`）；`resource_url`/`resource_path`/`resource_text`/`resource_bytes`/`random` 解析草稿工作区自己的 `Resources/` 目录（严格校验相对路径、禁止越界），图片/字体以内联 `data URI` 输出以便 srcdoc 直接显示，避免 `random`/`resource_url` 等空值或报错。仅读取草稿工作区内的 `Templates`/`Resources`/`Extension.toml`，不写任何文件。
 
 ## 四、状态模型
 

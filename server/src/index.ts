@@ -516,11 +516,23 @@ async function handleRequest(req: Request): Promise<Response> {
           return json([]);
         }
         case 'preview': {
-          // 模板预览：渲染包/模板扩展的 Jinja2 渲染预览（工作台右栏 iframe）
+          // 模板预览：渲染包/模板扩展的 Jinja2 渲染预览（工作台右栏 iframe + 放大弹窗）
           if (req.method === 'POST') {
-            const body = (await req.json().catch(() => ({}))) as { template?: string };
+            const body = (await req.json().catch(() => ({}))) as {
+              template?: string;
+              width?: number;
+              height?: number;
+            };
             try {
-              return json(await renderTemplatePreview(draftId, body.template ?? ''));
+              // 放大弹窗可按需指定渲染尺寸（限制合理范围，防止子进程超时/超大输出）
+              const opts: { width?: number; height?: number } = {};
+              if (typeof body.width === 'number' && Number.isFinite(body.width) && body.width >= 320 && body.width <= 2560) {
+                opts.width = Math.round(body.width);
+              }
+              if (typeof body.height === 'number' && Number.isFinite(body.height) && body.height >= 240 && body.height <= 4096) {
+                opts.height = Math.round(body.height);
+              }
+              return json(await renderTemplatePreview(draftId, body.template ?? '', opts));
             } catch (e) {
               if (e instanceof PreviewError) return errorJson(e.message, 1, 400);
               return errorJson(`模板预览失败：${(e as Error).message}`, 1, 400);

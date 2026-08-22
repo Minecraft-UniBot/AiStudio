@@ -165,9 +165,12 @@ export const useStudioStore = defineStore('studio', () => {
     return (data && data.templates) || []
   }
 
-  /** 渲染指定模板为 HTML，返回 { html, template, templates } */
-  async function renderPreview(id, template) {
-    return await api(`/drafts/${id}/preview`, { method: 'POST', body: { template: template || '' } })
+  /** 渲染指定模板为 HTML，返回 { html, template, templates }；opts 可指定 width/height（放大预览） */
+  async function renderPreview(id, template, opts = {}) {
+    const body = { template: template || '' }
+    if (opts.width) body.width = opts.width
+    if (opts.height) body.height = opts.height
+    return await api(`/drafts/${id}/preview`, { method: 'POST', body })
   }
 
   // ---- 校验 / 发布 ----
