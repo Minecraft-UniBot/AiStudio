@@ -1,6 +1,6 @@
 <script setup>
-// 平台设置：功能开关、OpenCode 工具注册表、提示词管理（版本化）
-import { onMounted, ref, computed } from 'vue'
+// 平台设置：功能开关、OpenCode 工具注册表、提示词模板展示
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { api } from '@/utils/api'
@@ -9,9 +9,6 @@ import { use_toast } from '@/composables/use_toast'
 import Button from '@/components/ui/Button.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
 import Badge from '@/components/ui/Badge.vue'
-import Textarea from '@/components/ui/Textarea.vue'
-import Dialog from '@/components/ui/Dialog.vue'
-import Select from '@/components/ui/Select.vue'
 import UnibotDirSetupDialog from '@/components/studio/UnibotDirSetupDialog.vue'
 import CustomProviderDialog from '@/components/studio/CustomProviderDialog.vue'
 
@@ -25,12 +22,6 @@ const prompts = ref([])
 const saving = ref(false)
 // UniBot 目录设置对话框（编辑现有目录 / 首次未配置时引导）
 const dirSetupOpen = ref(false)
-
-// 提示词编辑
-const editingPrompt = ref(null) // { name, content, version }
-const promptEditorOpen = ref(false)
-const promptSaving = ref(false)
-const selectedPromptVersions = ref([])
 
 // 自定义 OpenAI 兼容提供商
 const providerDialogOpen = ref(false)
@@ -103,50 +94,6 @@ async function toggleTool(tool) {
     tools.value = await api('/tools', { method: 'PATCH', body: tools.value })
   } catch (e) {
     tool.enabled = !tool.enabled
-    toast_error(e.message)
-  }
-}
-
-// ===== 提示词管理（Plan 7.1：编辑、预览、启用版本、回滚） =====
-function openPromptEditor(prompt) {
-  selectedPromptVersions.value = prompt.versions
-  const latest = prompt.versions[prompt.versions.length - 1]
-  editingPrompt.value = {
-    name: prompt.name,
-    content: latest.content,
-    version: latest.version,
-    current_version: prompt.current_version,
-  }
-  promptEditorOpen.value = true
-}
-
-async function savePromptVersion() {
-  if (!editingPrompt.value?.content) return
-  promptSaving.value = true
-  try {
-    const created = await api(`/prompts/${editingPrompt.value.name}`, {
-      method: 'POST',
-      body: { content: editingPrompt.value.content },
-    })
-    toast_success(`已保存为 v${created.version}（未自动启用，可在下方启用）`)
-    promptEditorOpen.value = false
-    prompts.value = await api('/prompts')
-  } catch (e) {
-    toast_error(e.message)
-  } finally {
-    promptSaving.value = false
-  }
-}
-
-async function activateVersion(prompt, version) {
-  try {
-    await api(`/prompts/${prompt.name}/activate`, {
-      method: 'POST',
-      body: { version },
-    })
-    toast_success(`已启用 ${prompt.name} v${version}`)
-    prompts.value = await api('/prompts')
-  } catch (e) {
     toast_error(e.message)
   }
 }
@@ -304,36 +251,20 @@ function permissionVariant(permission) {
         </div>
       </section>
 
-      <!-- 提示词管理（Plan 7.1） -->
+      <!-- 提示词模板（只读展示） -->
       <section class="card">
         <header class="card-top">
           <span class="card-icon"><Icon icon="lucide:scroll-text" width="16" /></span>
           <div class="card-titles">
             <h3>提示词模板</h3>
-            <p>修改保存为新版本（旧版本可回滚），启用后立即生效</p>
+            <p>平台内置提示词与当前启用的版本</p>
           </div>
         </header>
         <div class="card-body">
           <div class="item-list">
-            <div v-for="prompt in prompts" :key="prompt.name" class="row-item">
-              <div class="row-main">
-                <div class="row-title">
-                  <span class="mono row-name">{{ prompt.name }}.md</span>
-                  <Badge variant="neutral">v{{ prompt.current_version }}</Badge>
-                </div>
-                <small class="row-note">共 {{ prompt.versions.length }} 个版本 · 当前启用 v{{ prompt.current_version }}</small>
-              </div>
-              <div class="row-actions">
-                <Select
-                  :model-value="String(prompt.current_version)"
-                  :options="prompt.versions.map((v) => ({ value: String(v.version), label: `v${v.version}${v.version === prompt.current_version ? '（当前）' : ''}` }))"
-                  class="version-select"
-                  @update:model-value="(value) => activateVersion(prompt, Number(value))"
-                />
-                <Button size="sm" @click="openPromptEditor(prompt)">
-                  <Icon icon="lucide:pencil" width="13" /> 编辑
-                </Button>
-              </div>
+            <div v-for="prompt in prompts" :key="prompt.name" class="row-item prompt-row">
+              <span class="mono row-name">{{ prompt.name }}.md</span>
+              <Badge variant="accent" class="version-pill mono">v{{ prompt.current_version }}</Badge>
             </div>
           </div>
         </div>
@@ -391,27 +322,6 @@ function permissionVariant(permission) {
 
     <!-- 添加 OpenAI 兼容提供商对话框 -->
     <CustomProviderDialog v-model="providerDialogOpen" />
-
-    <!-- 提示词编辑器 -->
-    <Dialog
-      v-model="promptEditorOpen"
-      title="编辑提示词模板"
-      :description="editingPrompt ? `正在编辑 ${editingPrompt.name}.md（基于 v${editingPrompt.version}）` : ''"
-      confirm-text="保存为新版本"
-      :loading="promptSaving"
-      width="min(640px, calc(100vw - 32px))"
-      @confirm="savePromptVersion"
-    >
-      <p v-if="editingPrompt" class="editor-tip">
-        保存后生成新版本（v{{ editingPrompt.version + 1 }}），不会自动启用；可在列表中选择版本启用或回滚。
-      </p>
-      <Textarea
-        v-model="editingPrompt.content"
-        :rows="16"
-        class="prompt-editor mono"
-        placeholder="模板正文（支持 {{placeholder}} 占位符）"
-      />
-    </Dialog>
   </div>
 </template>
 
@@ -636,13 +546,6 @@ function permissionVariant(permission) {
   word-break: break-all;
 }
 
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
-}
-
 /* 模型 ID chips（超出 8 个折叠为 +N） */
 .chip-row {
   display: flex;
@@ -694,22 +597,24 @@ function permissionVariant(permission) {
   text-decoration: underline;
 }
 
-.version-select {
-  min-width: 132px;
+/* 提示词行：名称居左，版本徽章贴右 */
+.prompt-row {
+  padding: var(--space-3) var(--space-4);
 }
 
-/* 提示词编辑器对话框 */
-.editor-tip {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-  line-height: 1.5;
+.prompt-row .row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.prompt-editor {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.6;
+.version-pill {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-xs);
 }
 
 /* ---- UniBot 目录 ---- */
