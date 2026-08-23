@@ -25,7 +25,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, existsSync, copyFileSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync, renameSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createTcpServer } from 'node:net';
 import { join } from 'node:path';
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk';
@@ -243,12 +243,24 @@ class OpenCodeGateway {
     return config.opencode.data_dir;
   }
 
-  /** 启动 OpenCode 子进程并等待健康 */
+  /** 启动 OpenCode 子进程并等待健康（手动启动重置异常重启计数） */
   async start(): Promise<OpenCodeStatus> {
     this.stopping = false;
+    this.restarts = 0;
     await this.ensureBinary();
     await this.launch();
     return this.status;
+  }
+
+  /**
+   * 重启子进程：配置文件变更（自定义提供商增删，见 studio/custom_providers.ts）
+   * 后让 opencode 重新读取。进行中的 AI 生成会被中断——调用方必须先确认
+   * 没有草稿处于规划/编码状态。幂等；事件订阅由协调循环自动重建。
+   */
+  async restart(): Promise<OpenCodeStatus> {
+    logger.info('opencode', '重启 opencode serve（配置变更生效）');
+    await this.stop();
+    return this.start();
   }
 
   /**
@@ -325,42 +337,70 @@ class OpenCodeGateway {
     }
   }
 
+  /** opencode.jsonc 路径（隔离 XDG 配置目录内，opencode 启动时读取） */
+  private configFile(): string {
+    return join(config.opencode.data_dir, 'config', 'opencode', 'opencode.jsonc');
+  }
+
+  /** 读取 opencode 配置（缺失/损坏时返回带 $schema 的空配置） */
+  private loadConfig(): Record<string, unknown> {
+    const file = this.configFile();
+    try {
+      const text = existsSync(file) ? readFileSync(file, 'utf-8') : '';
+      const parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {
+      // 配置损坏则从默认开始
+    }
+    return { $schema: 'https://opencode.ai/config.json' };
+  }
+
+  /** 原子保存 opencode 配置（临时文件 + rename） */
+  private saveConfig(cfg: Record<string, unknown>): void {
+    const file = this.configFile();
+    mkdirSync(join(file, '..'), { recursive: true });
+    const tmp = file + '.tmp';
+    writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, file);
+  }
+
+  /**
+   * 写入/更新一个自定义 provider 定义（OpenAI 兼容渠道，见 studio/custom_providers.ts）。
+   * 只改文件不重启：opencode 启动时才读取，调用方需随后 restart()。
+   */
+  upsertProvider(id: string, definition: Record<string, unknown>): void {
+    const cfg = this.loadConfig();
+    const provider = (cfg.provider as Record<string, unknown>) ?? {};
+    provider[id] = definition;
+    cfg.provider = provider;
+    this.saveConfig(cfg);
+  }
+
+  /** 从 opencode 配置移除自定义 provider 定义（幂等）；同样需要 restart() 生效 */
+  removeProvider(id: string): void {
+    const cfg = this.loadConfig();
+    const provider = (cfg.provider as Record<string, unknown>) ?? {};
+    if (!(id in provider)) return;
+    delete provider[id];
+    cfg.provider = provider;
+    this.saveConfig(cfg);
+  }
+
   /**
    * 注入 LLM 超时配置到隔离配置目录（AGENT.md「输出停止」排查结论）：
    * 思考模型长时间无输出时，opencode 默认的 chunkTimeout（约 30s）会提前掐断请求。
    * 在 <opencode data>/config/opencode/opencode.jsonc 写入
    * options.timeout / options.chunkTimeout（只补未显式配置的项，优先保留用户配置）。
    *
-   * 覆盖范围：配置文件中已出现的所有 provider + 常见内置 provider + opencode 网关
-   * （provider id 为 "opencode"，免费/共享模型走此通道——此前只注入固定 7 家，
-   * 恰好漏掉实际使用的网关 provider，导致默认 chunkTimeout 仍然生效）。
+   * 覆盖范围：配置文件中已出现的所有 provider + opencode Zen 网关。
+   * 内置大厂 provider 已全部移除（平台只开放 Zen 免费网关 + 自定义 OpenAI
+   * 兼容渠道——后者定义写入 cfg.provider，同样走下方 Object.keys(provider) 注入）。
    */
   private syncTimeoutConfig(): void {
     try {
-      const configDir = join(config.opencode.data_dir, 'config', 'opencode');
-      mkdirSync(configDir, { recursive: true });
-      const file = join(configDir, 'opencode.jsonc');
-      let cfg: Record<string, unknown> = { $schema: 'https://opencode.ai/config.json' };
-      try {
-        const text = existsSync(file) ? readFileSync(file, 'utf-8') : '';
-        const parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-        if (parsed && typeof parsed === 'object') cfg = parsed;
-      } catch {
-        // 配置损坏则从默认开始
-      }
-      const KNOWN_PROVIDERS = [
-        'anthropic',
-        'openai',
-        'deepseek',
-        'openrouter',
-        'gemini',
-        'azure',
-        'github-copilot',
-        'opencode', // opencode 网关（Zen 共享模型）
-        'groq',
-        'mistral',
-        'xai',
-      ];
+      // 仅内置 opencode 网关（Zen 共享/免费模型通道）
+      const KNOWN_PROVIDERS = ['opencode'];
+      const cfg = this.loadConfig();
       const provider = (cfg.provider as Record<string, unknown>) ?? {};
       const timeout = config.opencode.timeout_ms;
       const chunkTimeout = config.opencode.chunk_timeout_ms;
@@ -378,7 +418,7 @@ class OpenCodeGateway {
         provider[id] = p;
       }
       cfg.provider = provider;
-      writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
+      this.saveConfig(cfg);
       logger.info('opencode', `已注入 LLM 超时配置（timeout=${timeout}ms, chunkTimeout=${chunkTimeout}ms）`, {
         providers: [...covered].sort(),
       });
@@ -418,7 +458,8 @@ class OpenCodeGateway {
       UNIBOT_STUDIO_API_TOKEN: issueToken(365 * 24 * 60 * 60 * 1000),
     };
 
-    this.process = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    this.process = child;
     this.url = `http://127.0.0.1:${this.port}`;
     logger.info('opencode', `启动 opencode serve（第 ${this.restarts + 1} 次尝试）`, {
       bin,
@@ -442,9 +483,12 @@ class OpenCodeGateway {
         }
       });
     };
-    pipeOutput(this.process.stdout, 'opencode');
-    pipeOutput(this.process.stderr, 'opencode:stderr');
-    this.process.on('exit', (code, signal) => {
+    pipeOutput(child.stdout, 'opencode');
+    pipeOutput(child.stderr, 'opencode:stderr');
+    // 事件回调按实例比对：restart() 用新子进程替换 this.process 后，旧实例迟到的
+    // exit/error 事件不得触碰新进程或触发重启计数
+    child.on('exit', (code, signal) => {
+      if (this.process !== child) return;
       this.client = null;
       this.status.available = false;
       this.status.url = null;
@@ -458,7 +502,8 @@ class OpenCodeGateway {
         logger.error('opencode', 'OpenCode 进程退出且超过重启上限', { code, signal, restarts: this.restarts });
       }
     });
-    this.process.on('error', (err) => {
+    child.on('error', (err) => {
+      if (this.process !== child) return;
       this.status.available = false;
       this.status.error = `无法启动 OpenCode：${err.message}`;
       logger.error('opencode', '无法启动 OpenCode', { error: err.message });

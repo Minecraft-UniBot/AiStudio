@@ -23,6 +23,7 @@ import {
   inferResumeStatus,
   listDrafts,
   listFiles,
+  promptModelChoice,
   readDraft,
   readDraftFile,
   resolveDraftPath,
@@ -47,6 +48,14 @@ import {
   validateDraft,
 } from './studio/test_tools';
 import { assertFeatureEnabled } from './ai/registry';
+import {
+  addCustomProvider,
+  CustomProviderError,
+  isSelectableProvider,
+  listCustomProviders,
+  maskCustomProvider,
+  removeCustomProvider,
+} from './studio/custom_providers';
 import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './studio/templates';
 import { PreviewError, listTemplateNames, renderTemplatePreview } from './studio/preview';
 import {
@@ -93,6 +102,21 @@ function draftFileList(draftId: string) {
     const full = resolveDraftPath(draftId, `${prefix}${f}`);
     return { path: f, size: statSync(full).size };
   });
+}
+
+/**
+ * 平台可选的模型提供商（options 接口与切换模型校验共用）：
+ * 只保留 OpenCode Zen 免费网关 + 自定义 OpenAI 兼容提供商，
+ * opencode 认证的其他 provider 一律不下发到前端。
+ */
+async function selectableProviders() {
+  const providersRes = await opencode.getClient().config.providers({});
+  const all = normalizeProviders(
+    ((providersRes.data as { providers?: unknown[] })?.providers ?? []) as Array<
+      Record<string, unknown>
+    >,
+  );
+  return all.filter((p) => isSelectableProvider(p.provider_id));
 }
 
 // ===== 路由 =====
@@ -258,20 +282,60 @@ async function handleRequest(req: Request): Promise<Response> {
   if (path === '/api/studio/options' && req.method === 'GET') {
     try {
       const client = opencode.getClient();
-      const [providersRes, agentsRes] = await Promise.all([
-        client.config.providers({}),
+      // providers 只下发 Zen 免费网关 + 自定义 OpenAI 兼容（见 selectableProviders）
+      const [providers, agentsRes] = await Promise.all([
+        selectableProviders(),
         client.app.agents({}),
       ]);
-      const providerList = (providersRes.data as { providers?: unknown[] })?.providers ?? [];
-      // opencode Provider 结构：{ id, name, models: { [modelID]: Model } }，
-      // models 是对象字典而非数组；Provider/Model 用 name。统一归一化给前端（见 opencode.ts）。
-      const providers = normalizeProviders(providerList as Array<Record<string, unknown>>);
       const agents = (agentsRes.data as Array<{ name?: string }> ?? [])
         .map((a) => String(a.name ?? ''))
         .filter(Boolean);
       return json({ providers, agents, test_tools_enabled: config.features.test_tools });
     } catch (e) {
       return errorJson(`获取模型/Agent 失败：${(e as Error).message}`, 1, 503);
+    }
+  }
+
+  // ---- 自定义 OpenAI 兼容提供商（模型选择器只显示 Zen 网关 + 这里的自定义项） ----
+  const cpDeleteMatch = path.match(/^\/api\/studio\/custom-providers\/([^/]+)$/);
+  if (path === '/api/studio/custom-providers' || cpDeleteMatch) {
+    // 增删都会重启 opencode 子进程使配置生效：有规划/编码任务时拒绝，避免中断生成
+    if (req.method === 'POST' || req.method === 'DELETE') {
+      const active = listDrafts().filter((d) => ['planning', 'coding'].includes(d.status));
+      if (active.length > 0) {
+        return errorJson(
+          `已有草稿「${active[0]!.name}」正在规划/编码中，修改提供商会重启 OpenCode 中断生成，请稍后再试`,
+          1,
+          409,
+        );
+      }
+    }
+    try {
+      if (req.method === 'GET') {
+        return json(listCustomProviders().map(maskCustomProvider));
+      }
+      if (req.method === 'POST') {
+        const body = (await req.json()) as {
+          name?: string;
+          base_url?: string;
+          api_key?: string;
+          models?: string[];
+        };
+        const created = await addCustomProvider(body);
+        // 重启让 opencode 读取新 provider 定义；即使健康检查失败也返回成功
+        //（注册表已落盘，下次启动自动生效），前端刷新 options 时会看到实际可用性
+        await opencode.restart();
+        return json(created);
+      }
+      if (req.method === 'DELETE' && cpDeleteMatch) {
+        removeCustomProvider(cpDeleteMatch[1]!);
+        await opencode.restart();
+        logger.info('providers', '自定义提供商已删除并重启 OpenCode', { id: cpDeleteMatch[1] });
+        return json({ ok: true });
+      }
+    } catch (e) {
+      if (e instanceof CustomProviderError) return errorJson(e.message);
+      return errorJson(`保存自定义提供商失败：${(e as Error).message}`);
     }
   }
 
@@ -404,6 +468,7 @@ async function handleRequest(req: Request): Promise<Response> {
           parts: [{ type: 'text', text: planningPrompt }],
           agent: draft.agent,
           system,
+          model: promptModelChoice(draft),
         },
         query: { directory: workspace },
       });
@@ -484,7 +549,10 @@ async function handleRequest(req: Request): Promise<Response> {
             try {
               await client.session.promptAsync({
                 path: { id: sessionId },
-                body: { parts: [{ type: 'text', text: body.text }] },
+                body: {
+                  parts: [{ type: 'text', text: body.text }],
+                  model: promptModelChoice(draft),
+                },
                 query: { directory: workspace },
               });
             } catch (e) {
@@ -520,6 +588,49 @@ async function handleRequest(req: Request): Promise<Response> {
             }
             logger.info('draft', '停止生成', { draft_id: draftId, extension_id: draft.extension_id });
             return json({ ok: true });
+          }
+          break;
+        }
+        case 'model': {
+          // 开发途中切换模型（每个草稿仅一次）：更新草稿模型选择，后续所有 prompt
+          // （聊天 / 编码续接 / 校验修复）都会携带新模型。规划/编码进行中禁止切换，
+          // 与发消息的限制一致，避免与运行中的请求产生竞争。
+          if (req.method === 'POST') {
+            if (draft.status === 'published') return errorJson('已发布草稿为只读', 1, 400);
+            if (['planning', 'coding'].includes(draft.status)) {
+              return errorJson('后台任务进行中，请先停止或等待完成后再切换模型', 1, 409);
+            }
+            if (draft.model_switched) {
+              return errorJson('该草稿已使用过一次模型切换机会，无法再次切换', 1, 409);
+            }
+            const body = (await req.json().catch(() => ({}))) as {
+              provider_id?: string;
+              model_id?: string;
+            };
+            const next =
+              body?.provider_id && body?.model_id
+                ? { provider_id: body.provider_id, model_id: body.model_id }
+                : null;
+            // 所选组合必须在平台可选范围内（Zen 网关或自定义提供商），且真实存在
+            if (next) {
+              const providers = await selectableProviders();
+              const provider = providers.find((p) => p.provider_id === next.provider_id);
+              if (!provider) {
+                return errorJson(`提供商「${next.provider_id}」不存在或未在 OpenCode 中配置`);
+              }
+              if (!provider.models.some((m) => m.id === next.model_id)) {
+                return errorJson(`模型「${next.model_id}」不存在于提供商「${next.provider_id}」`);
+              }
+            }
+            const updated = updateDraft(draftId, { model: next, model_switched: true });
+            broadcast({ type: 'draft.updated', draft_id: draftId, status: updated.status });
+            logger.info('draft', '开发途中切换模型', {
+              draft_id: draftId,
+              extension_id: draft.extension_id,
+              from: draft.model ? `${draft.model.provider_id}/${draft.model.model_id}` : 'auto',
+              to: updated.model ? `${updated.model.provider_id}/${updated.model.model_id}` : 'auto',
+            });
+            return json(updated);
           }
           break;
         }
@@ -679,7 +790,10 @@ async function handleRequest(req: Request): Promise<Response> {
             try {
               await client.session.promptAsync({
                 path: { id: sessionId },
-                body: { parts: [{ type: 'text', text: prompt }] },
+                body: {
+                  parts: [{ type: 'text', text: prompt }],
+                  model: promptModelChoice(current),
+                },
                 query: { directory: workspace },
               });
             } catch (e) {

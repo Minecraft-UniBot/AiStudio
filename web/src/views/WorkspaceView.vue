@@ -16,6 +16,7 @@ import Dialog from '@/components/ui/Dialog.vue'
 import ResizablePanel from '@/components/ui/ResizablePanel.vue'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
+import Select from '@/components/ui/Select.vue'
 import Spinner from '@/components/ui/Spinner.vue'
 import FileViewer from '@/components/studio/FileViewer.vue'
 import TemplatePreview from '@/components/studio/TemplatePreview.vue'
@@ -44,6 +45,57 @@ const revertTarget = ref('')
 const revertOpen = ref(false)
 /** 本地摘要过期标记：发送消息后置 true，校验通过后清除 */
 const revisionDirty = ref(false)
+
+// ===== 开发途中切换模型（每个草稿仅一次） =====
+const modelOpen = ref(false)
+const switching = ref(false)
+const modelForm = ref({ provider_id: '', model_id: '' })
+
+const currentModelLabel = computed(() =>
+  draft.value?.model
+    ? `${draft.value.model.provider_id}/${draft.value.model.model_id}`
+    : '自动',
+)
+const canSwitchModel = computed(
+  () => !draft.value?.model_switched && draft.value?.status !== 'published',
+)
+
+const providerOptions = computed(() =>
+  store.options.providers.map((p) => ({ value: p.provider_id, label: p.label })),
+)
+const modelOptions = computed(() => {
+  const provider = store.options.providers.find(
+    (p) => p.provider_id === modelForm.value.provider_id,
+  )
+  return (provider?.models ?? []).map((m) => ({ value: m.id, label: m.label }))
+})
+
+async function openModelSwitch() {
+  // 模型列表按需拉取（工作台默认不加载 options），失败时对话框里展示错误提示
+  if (!store.options.providers.length) await store.fetchOptions()
+  modelForm.value = {
+    provider_id: draft.value?.model?.provider_id ?? '',
+    model_id: draft.value?.model?.model_id ?? '',
+  }
+  modelOpen.value = true
+}
+
+async function confirmSwitch() {
+  switching.value = true
+  try {
+    const { provider_id, model_id } = modelForm.value
+    await store.switchModel(
+      draftId,
+      provider_id && model_id ? { provider_id, model_id } : null,
+    )
+    modelOpen.value = false
+    toast_success('模型已切换，从下一次对话开始生效')
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    switching.value = false
+  }
+}
 
 const draft = computed(() => store.currentDraft)
 const busy = computed(() =>
@@ -488,7 +540,28 @@ onUnmounted(() => {
                   <dt>Agent</dt>
                   <dd class="mono">{{ draft.agent }}</dd>
                   <dt>模型</dt>
-                  <dd class="mono">{{ draft.model ? `${draft.model.provider_id}/${draft.model.model_id}` : '自动' }}</dd>
+                  <dd>
+                    <div class="model-row">
+                      <span class="mono">{{ currentModelLabel }}</span>
+                      <button
+                        v-if="canSwitchModel"
+                        type="button"
+                        class="link"
+                        :disabled="busy"
+                        title="开发途中可切换一次模型"
+                        @click="openModelSwitch"
+                      >
+                        切换
+                      </button>
+                    </div>
+                    <span class="model-hint">
+                      {{
+                        draft.model_switched
+                          ? '切换机会已用完（每个草稿限一次）'
+                          : '可切换一次，从下一次对话开始生效'
+                      }}
+                    </span>
+                  </dd>
                   <dt>创建时间</dt>
                   <dd>{{ new Date(draft.created_at).toLocaleString() }}</dd>
                   <dt>最近更新</dt>
@@ -526,6 +599,31 @@ onUnmounted(() => {
       :loading="reverting"
       @confirm="confirmRevert"
     />
+
+    <!-- 模型切换（一次性）：不选提供商即恢复「自动」，同样消耗切换机会 -->
+    <Dialog
+      v-model="modelOpen"
+      title="切换模型"
+      description="每个草稿仅有一次切换机会，确认后不可撤销；新模型从下一次对话开始生效。"
+      confirm-text="确认切换"
+      :loading="switching"
+      @confirm="confirmSwitch"
+    >
+      <div class="model-form">
+        <span v-if="store.optionsError" class="model-hint danger">{{ store.optionsError }}</span>
+        <Select
+          v-model="modelForm.provider_id"
+          :options="providerOptions"
+          placeholder="选择提供商（留空恢复自动）"
+        />
+        <Select
+          v-model="modelForm.model_id"
+          :options="modelOptions"
+          placeholder="自动选择模型"
+          :disabled="!modelForm.provider_id"
+        />
+      </div>
+    </Dialog>
 
     <!-- 大尺寸文件查看器 -->
     <FileViewer
@@ -735,6 +833,44 @@ onUnmounted(() => {
 .info-grid dd {
   margin: 0;
   word-break: break-all;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.model-hint {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.model-hint.danger {
+  color: var(--danger);
+}
+
+.model-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .status-box {

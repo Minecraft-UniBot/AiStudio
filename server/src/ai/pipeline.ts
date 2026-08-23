@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { draftWorkspace, readDraft, updateDraft, DraftError } from '../studio/drafts';
+import { draftWorkspace, readDraft, updateDraft, DraftError, promptModelChoice } from '../studio/drafts';
 import { opencode } from '../opencode/gateway';
 import { logger } from '../core/logger';
 import {
@@ -94,6 +94,7 @@ export async function startCoding(draftId: string): Promise<void> {
       parts: [{ type: 'text', text: codingPrompt }],
       agent: draft.agent,
       system,
+      model: promptModelChoice(draft),
     },
     query: { directory: workspace },
   });

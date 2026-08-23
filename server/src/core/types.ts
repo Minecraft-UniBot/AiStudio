@@ -122,6 +122,8 @@ export interface DraftMeta {
   phase?: PipelinePhase | null;
   session_id: string | null;
   model: ModelChoice | null;
+  /** 开发途中的一次性模型切换是否已用掉（每个草稿仅允许切换一次，见 POST /drafts/:id/model） */
+  model_switched?: boolean;
   agent: string;
   /** 规划产物（PLAN.md 内容摘要，供前端展示） */
   plan_summary?: string | null;

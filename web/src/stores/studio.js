@@ -26,6 +26,8 @@ export const useStudioStore = defineStore('studio', () => {
   const todo = ref([])
   const options = ref({ providers: [], agents: [], test_tools_enabled: true })
   const optionsError = ref('')
+  // 自定义 OpenAI 兼容提供商（脱敏后列表，见 server/custom_providers.ts）
+  const customProviders = ref([])
   const templates = ref([])
   const templatesError = ref('')
   // 目标 MC 服务器（{ configured, dir, info }；info 为扫描结果快照，见 server/mc_server.ts）
@@ -55,6 +57,24 @@ export const useStudioStore = defineStore('studio', () => {
       // OpenCode 不可用/获取失败时保留提示，前端不再静默显示空模型列表
       optionsError.value = e.message || '获取模型列表失败'
     }
+  }
+
+  // ---- 自定义 OpenAI 兼容提供商（增删会触发后端重启 OpenCode，完成后刷新选项） ----
+  async function fetchCustomProviders() {
+    customProviders.value = await api('/custom-providers')
+    return customProviders.value
+  }
+
+  /** 添加提供商（name/base_url/api_key/models?），成功后返回脱敏记录 */
+  async function addCustomProvider(input) {
+    const created = await api('/custom-providers', { method: 'POST', body: input })
+    await Promise.all([fetchCustomProviders(), fetchOptions()])
+    return created
+  }
+
+  async function removeCustomProvider(id) {
+    await api(`/custom-providers/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    await Promise.all([fetchCustomProviders(), fetchOptions()])
   }
 
   // ---- 开发模板 ----
@@ -130,6 +150,18 @@ export const useStudioStore = defineStore('studio', () => {
   async function removeDraft(id) {
     await api(`/drafts/${id}`, { method: 'DELETE' })
     drafts.value = drafts.value.filter((d) => d.id !== id)
+  }
+
+  /**
+   * 开发途中切换模型（每个草稿仅一次）：model 为 { provider_id, model_id } 或 null（回到自动）。
+   * 返回更新后的草稿；后端校验状态与切换次数，失败时抛错。
+   */
+  async function switchModel(id, model) {
+    const draft = await api(`/drafts/${id}/model`, { method: 'POST', body: model })
+    if (currentDraft.value?.id === id) currentDraft.value = draft
+    const idx = drafts.value.findIndex((d) => d.id === id)
+    if (idx >= 0) drafts.value[idx] = draft
+    return draft
   }
 
   // ---- 会话 ----
@@ -346,6 +378,7 @@ export const useStudioStore = defineStore('studio', () => {
     todo,
     options,
     optionsError,
+    customProviders,
     templates,
     templatesError,
     connected,
@@ -356,6 +389,9 @@ export const useStudioStore = defineStore('studio', () => {
     opencodeAvailable,
     fetchStatus,
     fetchOptions,
+    fetchCustomProviders,
+    addCustomProvider,
+    removeCustomProvider,
     fetchTemplates,
     pullTemplate,
     mcServer,
@@ -367,6 +403,7 @@ export const useStudioStore = defineStore('studio', () => {
     createDraft,
     fetchDraft,
     removeDraft,
+    switchModel,
     fetchMessages,
     sendPrompt,
     abort,

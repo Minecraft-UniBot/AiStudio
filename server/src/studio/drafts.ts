@@ -323,6 +323,7 @@ export function createDraft(input: {
     phase: 'planning',
     session_id: null,
     model: input.model,
+    model_switched: false,
     agent: input.agent,
     validation: null,
     validation_revision: null,
@@ -452,6 +453,18 @@ export function assertPromptable(draft: DraftMeta) {
   if (draft.status === 'planning' || draft.status === 'coding') {
     throw new DraftError('后台任务进行中，请稍候', 'BUSY');
   }
+}
+
+/**
+ * OpenCode prompt 的 model 参数：把草稿元数据里的模型选择转成 SDK 要求的
+ * { providerID, modelID } 形态；未选择模型时返回 undefined（走 opencode 默认配置）。
+ * 所有 session.promptAsync 调用都必须带上，否则创建时选的模型只是摆设。
+ */
+export function promptModelChoice(
+  meta: DraftMeta,
+): { providerID: string; modelID: string } | undefined {
+  if (!meta.model) return undefined;
+  return { providerID: meta.model.provider_id, modelID: meta.model.model_id };
 }
 
 /**
