@@ -173,6 +173,7 @@ function permissionVariant(permission) {
     </header>
 
     <main class="content">
+      <div class="content-inner">
       <!-- 页头 -->
       <div class="page-head">
         <h1>平台设置</h1>
@@ -377,6 +378,7 @@ function permissionVariant(permission) {
           </dl>
         </div>
       </section>
+      </div>
     </main>
 
     <!-- UniBot 目录设置对话框 -->
@@ -449,12 +451,16 @@ function permissionVariant(permission) {
 }
 
 .content {
+  /* 滚动容器保持全宽：滚动条贴窗口右缘；内容限宽由内层负责 */
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-6);
+}
+
+.content-inner {
   max-width: 760px;
   width: 100%;
   margin: 0 auto;
+  padding: var(--space-6);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -480,6 +486,9 @@ function permissionVariant(permission) {
 
 /* ---- 卡片：图标头 + 分隔线 + 内容区 ---- */
 .card {
+  /* 滚动容器内的 flex 子项：禁止收缩，否则会被压缩而不是撑开滚动条
+     （overflow 非 visible 时自动最小尺寸为 0，内容会被裁掉） */
+  flex-shrink: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);

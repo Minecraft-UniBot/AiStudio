@@ -71,9 +71,9 @@ function loadConfig(): StudioConfig {
     },
     features: {
       test_tools: true,
-      mc_test_environment: false,
-      market_publish: false,
-      git_integration: false,
+      mc_test_environment: true,
+      market_publish: true,
+      git_integration: true,
     },
     defaults: {
       agent: 'build',
