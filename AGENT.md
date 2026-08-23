@@ -103,7 +103,7 @@ server/src/
 │   ├── validation.ts   # 校验流水线编排（受限子进程调用 UniBot venv + 校验脚本）
 │   ├── publishing.ts   # 原子发布（staging + rename，摘要核对，拒绝覆盖）
 │   ├── test_tools.ts   # 测试工具后端实现（部署/移除/加载/日志/测试，只写测试环境）
-│   ├── templates.ts    # 开发模板注册表（minimal 内置 + Default GitHub 拉取缓存）
+│   ├── templates.ts    # 统一模板（Extension.Example GitHub 拉取缓存 + 示例代码清理）
 │   ├── preview.ts      # 模板预览编排（Jinja2 渲染草稿 Templates → HTML）
 │   ├── mc_server.ts    # 目标 MC 服务器选择/扫描（类型版本插件模组）/上下文渲染
 │   └── unibot_env.ts   # 共享 UniBot 测试环境（GitHub release 下载 + uv venv）+ runProcess
