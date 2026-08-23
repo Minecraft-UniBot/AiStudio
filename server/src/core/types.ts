@@ -104,7 +104,7 @@ export interface DraftMeta {
   name: string;
   description: string;
   types: ExtensionType[];
-  /** 创建时所选的开发模板（minimal / Default 等）；用于可重复性与展示 */
+  /** 创建脚手架所用的开发模板（当前恒为统一模板 Example） */
   template_id?: string | null;
   /**
    * 创建时选择的目标 MC 服务器快照（类型/版本/插件模组清单）。

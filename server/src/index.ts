@@ -56,7 +56,14 @@ import {
   maskCustomProvider,
   removeCustomProvider,
 } from './studio/custom_providers';
-import { ensureTemplatesInit, getTemplate, listTemplates, pullTemplate } from './studio/templates';
+import {
+  UNIFIED_TEMPLATE_ID,
+  ensureTemplatesInit,
+  getTemplate,
+  isTemplateInstalled,
+  listTemplates,
+  pullTemplate,
+} from './studio/templates';
 import { PreviewError, listTemplateNames, renderTemplatePreview } from './studio/preview';
 import {
   McServerError,
@@ -377,20 +384,15 @@ async function handleRequest(req: Request): Promise<Response> {
         types?: string[];
         model?: { provider_id?: string; model_id?: string } | null;
         agent?: string;
-        template_id?: string | null;
         /** 是否携带全局目标 MC 服务器上下文（默认 true；显式传 false 可跳过） */
         mc_server?: boolean;
       };
       if (!body.extension_id || !body.name || !body.description) {
         return errorJson('缺少必填字段（extension_id / name / description）');
       }
-      // 校验所选模板存在且可实例化（minimal 恒可用；extension 模板必须已安装）
-      const templateId = body.template_id && body.template_id !== 'minimal' ? body.template_id : null;
-      if (templateId) {
-        const info = getTemplate(templateId);
-        if (info.kind === 'extension' && !info.installed) {
-          return errorJson(`模板「${templateId}」尚未就绪，请稍后重试或先拉取该模板`, 1, 400);
-        }
+      // 统一模板校验：所有草稿都从统一模板起步（启动时后台拉取；未就绪时引导先拉取）
+      if (!isTemplateInstalled(UNIFIED_TEMPLATE_ID)) {
+        return errorJson('统一模板尚未就绪（启动时后台拉取中），请稍后重试或手动拉取', 1, 400);
       }
       // 全局并发限制（Plan 8.2）：同一管理员同时最多一个规划/编码任务
       const active = listDrafts().filter((d) =>
@@ -415,7 +417,6 @@ async function handleRequest(req: Request): Promise<Response> {
           ? { provider_id: body.model.provider_id, model_id: body.model.model_id }
           : null,
         agent: body.agent ?? config.defaults.agent,
-        template_id: templateId,
         mc_server: mcServerInfo,
       });
 
@@ -1149,7 +1150,7 @@ ensureDataDirs();
 const logFilePath = enableFileLogging();
 await opencode.start();
 
-// 初始化开发模板（后台拉取 Default 模板，不阻塞启动；见 templates.ts ensureTemplatesInit）
+// 初始化开发模板（后台拉取统一模板，不阻塞启动；见 templates.ts ensureTemplatesInit）
 ensureTemplatesInit();
 
 // 后台拉取 UniBot 测试环境（不阻塞启动：可能耗时数分钟；状态通过

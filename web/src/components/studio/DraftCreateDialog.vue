@@ -14,6 +14,9 @@ import Select from '@/components/ui/Select.vue'
 
 const open = defineModel({ type: Boolean, default: false })
 
+// 统一模板：所有类型草稿的唯一脚手架来源（后端从官方 Extension.Example 仓库拉取）
+const UNIFIED_TEMPLATE_ID = 'Example'
+
 const router = useRouter()
 const store = useStudioStore()
 const { success: toast_success, error: toast_error } = use_toast()
@@ -32,7 +35,7 @@ const form = ref({
 })
 
 // 打开对话框时刷新模板列表与目标服务器状态
-// （Default 模板可能在启动后仍在后台拉取；MC 服务器可能刚在其他页面设置过）
+// （统一模板可能在启动后仍在后台拉取；MC 服务器可能刚在其他页面设置过）
 watch(open, (val) => {
   if (val) {
     store.fetchTemplates().catch(() => {})
@@ -65,18 +68,9 @@ const payload_types = computed(() => {
   }
 })
 
-/** 依据主类型推导使用的开发模板 */
-const chosen_template_id = computed(() => {
-  // 渲染包/资源 → Default 模板；代码型 → 内置最小脚手架
-  return form.value.extension_kind === 'code' ? 'minimal' : 'Default'
-})
-
-/** 是否需要 Default 扩展模板（渲染包/资源场景） */
-const needs_default = computed(() => form.value.extension_kind !== 'code')
-
-/** Default 模板是否已就绪 */
-const default_ready = computed(() => {
-  const t = store.templates.find((x) => x.id === 'Default')
+/** 统一模板是否已就绪（未就绪时阻止创建并引导拉取） */
+const unified_ready = computed(() => {
+  const t = store.templates.find((x) => x.id === UNIFIED_TEMPLATE_ID)
   return t ? t.installed : false
 })
 
@@ -84,11 +78,11 @@ const default_ready = computed(() => {
 const kindHint = computed(() => {
   switch (form.value.extension_kind) {
     case 'template':
-      return '从默认模板（Default）克隆 Templates 素材起步，AI 帮你定制版式与配色'
+      return '从统一模板起步（标准扩展布局），AI 创建 Templates/ 并定制版式与配色'
     case 'resources':
-      return '从默认模板（Default）克隆 Resources 素材起步，AI 帮你整理图片/字体/样式片段'
+      return '从统一模板起步（标准扩展布局），AI 帮你整理 Resources/ 图片、字体与样式片段'
     default:
-      return `内置最小脚手架：从空白的 ${form.value.code_types.map((t) => TYPE_LABELS[t]).join(' / ') || '代码'} 开始，AI 直接实现`
+      return `统一模板（标准扩展布局）+ 干净脚手架：从空白的 ${form.value.code_types.map((t) => TYPE_LABELS[t]).join(' / ') || '代码'} 开始，AI 直接实现`
   }
 })
 
@@ -105,11 +99,11 @@ const description_placeholder = computed(() => {
 })
 
 async function retryPullTemplate() {
-  if (!needs_default.value) return
+  if (unified_ready.value) return
   pulling.value = true
   try {
-    const updated = await store.pullTemplate('Default')
-    const ready = updated.find((t) => t.id === 'Default')
+    const updated = await store.pullTemplate(UNIFIED_TEMPLATE_ID)
+    const ready = updated.find((t) => t.id === UNIFIED_TEMPLATE_ID)
     if (ready?.installed) toast_success(`模板「${ready.name}」已就绪`)
   } catch (e) {
     toast_error(e.message)
@@ -183,9 +177,9 @@ async function create() {
     toast_error('请至少选择一种扩展类型（指令或 API）')
     return
   }
-  // 需要 Default 模板但未就绪：阻止提交并提示先拉取
-  if (needs_default.value && !default_ready.value) {
-    toast_error('渲染/资源模板尚未就绪，请先点「立即拉取」')
+  // 统一模板未就绪：阻止提交并提示先拉取
+  if (!unified_ready.value) {
+    toast_error('统一模板尚未就绪，请先点「立即拉取」')
     return
   }
   creating.value = true
@@ -195,7 +189,6 @@ async function create() {
       name: form.value.name,
       description: form.value.description,
       types: payload_types.value,
-      template_id: chosen_template_id.value,
       model:
         form.value.provider_id && form.value.model_id
           ? { provider_id: form.value.provider_id, model_id: form.value.model_id }
@@ -251,8 +244,8 @@ function toggleCodeType(type) {
         <label class="form-label">扩展类型</label>
         <Select v-model="form.extension_kind" :options="kindOptions" placeholder="选择扩展类型" />
         <span class="form-hint">{{ kindHint }}</span>
-        <div v-if="needs_default && !default_ready" class="form-hint danger">
-          <span>渲染/资源模板「Default」尚未就绪（启动时后台拉取中），需要先就绪才能创建该类扩展。</span>
+        <div v-if="!unified_ready" class="form-hint danger">
+          <span>统一模板尚未就绪（启动时后台拉取中），需要先就绪才能创建扩展。</span>
           <button type="button" class="link" :disabled="pulling" @click="retryPullTemplate">
             {{ pulling ? '拉取中…' : '立即拉取' }}
           </button>

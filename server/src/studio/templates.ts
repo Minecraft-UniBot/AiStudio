@@ -1,14 +1,10 @@
 /**
  * 开发模板扩展（模板注册表）。
  *
- * 概念：新建扩展草稿时，平台默认以「开发模板」为起点，把模板的文件克隆进草稿
- * 工作区并自动改写 Extension.toml（id / name / description / types），由 AI 在此
- * 基础上继续实现 —— 而不是每次从空白脚手架开始。
- *
- * 模板来源（对应 AGENT.md 备用方案/后续版本）：
- * - `minimal`：平台内置的最小代码脚手架（api / command），为原有行为回退；
- * - `Default`：UniBot 默认图片渲染模板与资源扩展，启动初始化时从 GitHub
- *   （Minecraft-UniBot/Extension.Default）拉取并缓存到 `<data_dir>/templates/Default`。
+ * 概念：新建扩展草稿时，平台以「统一模板」为唯一起点，把官方扩展模板仓库
+ * （Minecraft-UniBot/Extension.Example）的标准多文件布局克隆进草稿工作区，
+ * 清除其中的示例代码（Commands/Config/Services 等），替换为干净的空白脚手架
+ * 并自动改写 Extension.toml（id / name / description / types），由 AI 在此基础上继续实现。
  *
  * 拉取采用 GitHub codeload tar.gz + 系统 tar 解压；模板以独立目录缓存，
  * 带 template.json 元数据标记（防止重复拉取）。路径操作仅限模板目录内。
@@ -30,46 +26,56 @@ import { logger } from '../core/logger';
 import type { ExtensionType } from '../core/types';
 import { runProcess } from './unibot_env';
 
+/** 统一模板 id：全部草稿的唯一脚手架来源 */
+export const UNIFIED_TEMPLATE_ID = 'Example';
+
 /** 模板信息（供新建草稿对话框与模板管理 API 展示） */
 export interface TemplateInfo {
   id: string;
-  /** extension = 已安装的扩展模板源（可克隆）；minimal = 内置最小脚手架 */
-  kind: 'extension' | 'minimal';
+  /** extension = 从 GitHub 拉取并缓存的扩展模板源（可克隆） */
+  kind: 'extension';
   name: string;
   description: string;
-  /** 该模板基础的扩展类型（Default 为 template + resources） */
+  /** 模板基础的扩展类型（统一模板覆盖 api + command，其余类型由清单改写声明目录） */
   types: ExtensionType[];
-  /** 来源 GitHub 仓库（仅 extension 类型） */
+  /** 来源 GitHub 仓库 */
   repo?: string;
-  /** 仓库内作为扩展根的子目录（如 Extension.Default 仓库的 `Extension/`） */
+  /** 仓库内作为扩展根的子目录（如 Extension.Example 仓库的 `Extension/`） */
   entry?: string;
-  /** 是否已拉取/缓存完成（extension 类型）；minimal 恒为 true */
+  /** 是否已拉取/缓存完成 */
   installed: boolean;
-  /** 模板清单中的扩展版本（extension：从缓存 Extension.toml 读取） */
+  /** 模板清单中的扩展版本（从缓存 Extension.toml 读取） */
   version: string | null;
   /** 拉取/缓存的更新时间 */
   updated_at: string | null;
 }
 
-/** 模板注册表（内置；后续可扩展为从 market/配置读取） */
+/** 模板注册表（当前仅统一模板一项；后续可扩展为从 market/配置读取） */
 const TEMPLATE_REGISTRY: Omit<TemplateInfo, 'installed' | 'version' | 'updated_at'>[] = [
   {
-    id: 'Default',
+    id: UNIFIED_TEMPLATE_ID,
     kind: 'extension',
-    name: '默认模板 & 资源',
-    description: 'UniBot 默认图片渲染模板与资源包（Default），含 Templates/ 主题与 Resources/ 材质，作为图片类扩展的起始骨架。',
-    types: ['template', 'resources'],
-    repo: 'Minecraft-UniBot/Extension.Default',
+    name: '统一模板',
+    description:
+      '官方扩展模板仓库（Extension.Example）的标准多文件布局；克隆时自动清除示例代码，替换为干净的空白脚手架。',
+    types: ['api', 'command'],
+    repo: 'Minecraft-UniBot/Extension.Example',
     entry: 'Extension',
   },
-  {
-    id: 'minimal',
-    kind: 'minimal',
-    name: '最小脚手架（API/Command）',
-    description: '平台内置的最小目录型代码脚手架，AI 从一个空白扩展（清单 + 入口 + 占位测试）开始编写。',
-    types: ['api', 'command'],
-  },
 ];
+
+/** 统一模板内的官方示例代码文件（克隆进草稿时清除，替换为干净脚手架） */
+const TEMPLATE_EXAMPLE_FILES = ['Commands.py', 'Config.py', 'Services.py'];
+
+/**
+ * 清除统一模板中的示例代码文件（保留清单；入口 `__init__.py` 由草稿脚手架重写或移除）。
+ * 按固定文件名清除而非清空整个目录：模板未来新增非代码素材时不受影响。
+ */
+export function stripTemplateExamples(dir: string): void {
+  for (const name of TEMPLATE_EXAMPLE_FILES) {
+    rmSync(join(dir, name), { force: true });
+  }
+}
 
 /** 模板根目录（<data_dir>/templates） */
 export function templatesRoot(): string {
@@ -124,9 +130,6 @@ function readTemplateSourceMeta(templateId: string): { version: string | null; t
 
 /** 解析注册表模板的最新状态（installed / version / updated_at） */
 function resolveTemplate(entry: (typeof TEMPLATE_REGISTRY)[number]): TemplateInfo {
-  if (entry.kind === 'minimal') {
-    return { ...entry, installed: true, version: null, updated_at: null };
-  }
   const marker = readMarker(entry.id);
   const installed = existsSync(join(templateSourceDir(entry.id), 'Extension.toml'));
   const sourceMeta = readTemplateSourceMeta(entry.id);
@@ -151,10 +154,9 @@ export function getTemplate(templateId: string): TemplateInfo {
   return resolveTemplate(entry);
 }
 
-/** 是否为 extension 类型模板且已安装 */
+/** 是否已安装（可克隆进草稿） */
 export function isTemplateInstalled(templateId: string): boolean {
-  const info = getTemplate(templateId);
-  return info.kind !== 'extension' || info.installed;
+  return getTemplate(templateId).installed;
 }
 
 /**
@@ -265,18 +267,17 @@ export function copyTree(src: string, dest: string): void {
 }
 
 /**
- * 初始化：确保至少内置 minimal 模板可用；若 Default 模板尚未拉取，则在后台
- * 拉取（不阻塞启动）。启动时调用；`minimal` 无文件，恒可用。
+ * 初始化：确保统一模板可用；尚未拉取时在后台拉取（不阻塞启动）。
+ * 启动时调用；失败仅记日志，用户可随时通过模板接口重试。
  */
 export function ensureTemplatesInit(): void {
   mkdirSync(templatesRoot(), { recursive: true });
-  const info = getTemplate('Default');
-  if (info.kind === 'extension' && !info.installed) {
-    // 后台拉取，不影响启动：失败仅记日志；用户随时可通过模板接口重试
-    void pullTemplate('Default')
-      .then((t) => logger.info('templates', '默认开发模板初始化完成', { template: t.id }))
+  const info = getTemplate(UNIFIED_TEMPLATE_ID);
+  if (!info.installed) {
+    void pullTemplate(UNIFIED_TEMPLATE_ID)
+      .then((t) => logger.info('templates', '统一模板初始化完成', { template: t.id }))
       .catch((e) =>
-        logger.warn('templates', '默认开发模板初始化失败（可稍后重试）', {
+        logger.warn('templates', '统一模板初始化失败（可稍后重试）', {
           error: (e as Error).message,
         }),
       );

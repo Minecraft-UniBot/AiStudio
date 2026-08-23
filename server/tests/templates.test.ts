@@ -1,17 +1,60 @@
 /**
- * 开发模板扩展测试：清单重写、目录复制与最小脚手架生成。
+ * 开发模板扩展测试：清单重写、目录复制与统一模板脚手架生成（示例代码清理）。
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { copyTree } from '../src/studio/templates';
 import { rewriteClonedManifest, scaffoldDraftWorkspace, hasCodeType } from '../src/studio/drafts';
+import { config } from '../src/core/config';
 
-function tmpdirAt(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `studio-${prefix}-`));
-  return dir;
+const ORIG_DATA_DIR = config.data_dir;
+let tmpData = '';
+
+beforeAll(() => {
+  tmpData = mkdtempSync(join(tmpdir(), 'studio-templates-'));
+  config.data_dir = tmpData;
+});
+
+afterAll(() => {
+  config.data_dir = ORIG_DATA_DIR;
+  if (tmpData) rmSync(tmpData, { recursive: true, force: true });
+});
+
+/** 与官方 Extension.Example 布局一致的种子模板缓存（避免测试触网） */
+function seedUnifiedTemplate(): void {
+  const source = join(tmpData, 'templates', 'Example', 'source');
+  mkdirSync(source, { recursive: true });
+  writeFileSync(
+    join(source, 'Extension.toml'),
+    [
+      '[manifest]',
+      'schema_version = 1',
+      '',
+      '[extension]',
+      'id = "Example"',
+      'name = "示例扩展"',
+      'version = "1.0.0"',
+      'author = "UniBot"',
+      'description = "一个演示 UniBot 扩展开发流程的示例扩展。"',
+      'types = ["api", "command"]',
+      '',
+      '[compatibility]',
+      'unibot = "*"',
+      '',
+      '[dependencies]',
+      'extensions = []',
+      'python = []',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+  writeFileSync(join(source, '__init__.py'), 'from .Config import ExampleConfig\n', 'utf-8');
+  writeFileSync(join(source, 'Commands.py'), '# 示例指令\n', 'utf-8');
+  writeFileSync(join(source, 'Config.py'), '# 示例配置\n', 'utf-8');
+  writeFileSync(join(source, 'Services.py'), '# 示例服务\n', 'utf-8');
 }
 
 describe('rewriteClonedManifest', () => {
@@ -38,11 +81,16 @@ describe('rewriteClonedManifest', () => {
       expect(out).toContain('version = "0.1.0"');
       // 模板中的 Jinja/random 函数内容作为字面量被保留，不能被破坏（重序列化可能改引号，语义不变）
       const doc = parseToml(out) as {
-        template?: { config_schema?: { background?: { default?: string } } };
+        template?: {
+          entry?: string;
+          config_schema?: { background?: { default?: string } };
+        };
       };
       expect(doc.template?.config_schema?.background?.default).toBe(
         '{{ random("Default", "Backgrounds") }}',
       );
+      // 无代码类型补目录声明（Loader 约定）
+      expect(doc.template?.entry).toBe('Templates');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -92,35 +140,49 @@ describe('copyTree', () => {
   });
 });
 
-describe('scaffoldDraftWorkspace (minimal)', () => {
-  test('生成清单 + 入口 + 占位测试', () => {
+describe('scaffoldDraftWorkspace (统一模板)', () => {
+  test('代码型：克隆统一模板并清除示例代码，写入干净入口与占位测试', () => {
+    seedUnifiedTemplate();
     const ws = tmpdirAt('workspace');
     try {
-      scaffoldDraftWorkspace(
-        ws,
-        { extensionId: 'Hello', name: '你好', description: '打招呼', types: ['command'] },
-        'minimal',
-      );
+      scaffoldDraftWorkspace(ws, {
+        extensionId: 'Hello',
+        name: '你好',
+        description: '打招呼',
+        types: ['command'],
+      });
+      // 示例代码被清除
+      expect(existsSync(join(ws, 'Commands.py'))).toBe(false);
+      expect(existsSync(join(ws, 'Config.py'))).toBe(false);
+      expect(existsSync(join(ws, 'Services.py'))).toBe(false);
+      // 清单被重写为用户信息
       const toml = readFileSync(join(ws, 'Extension.toml'), 'utf-8');
       expect(toml).toContain('id = "Hello"');
       expect(toml).toContain('command');
-      expect(readdirSync(join(ws, 'tests'))).toContain('test_extension.py');
+      expect(toml).toContain('version = "0.1.0"');
+      // 入口为干净脚手架（覆盖模板示例入口），占位测试就位
       expect(readFileSync(join(ws, '__init__.py'), 'utf-8')).toContain('你好');
+      expect(readdirSync(join(ws, 'tests'))).toContain('test_extension.py');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
   });
 
-  test('无代码类型（模板/资源）不生成 __init__.py，并声明模板/资源目录', () => {
+  test('无代码类型（模板/资源）：不留入口，建素材目录并在清单中声明', () => {
+    seedUnifiedTemplate();
     const ws = tmpdirAt('workspace-assets');
     try {
-      scaffoldDraftWorkspace(
-        ws,
-        { extensionId: 'ArtPack', name: '美术包', description: '模板与资源', types: ['template', 'resources'] },
-        'minimal',
-      );
+      scaffoldDraftWorkspace(ws, {
+        extensionId: 'ArtPack',
+        name: '美术包',
+        description: '模板与资源',
+        types: ['template', 'resources'],
+      });
       expect(existsSync(join(ws, '__init__.py'))).toBe(false);
       expect(existsSync(join(ws, 'tests'))).toBe(false);
+      expect(existsSync(join(ws, 'Commands.py'))).toBe(false);
+      expect(existsSync(join(ws, 'Templates'))).toBe(true);
+      expect(existsSync(join(ws, 'Resources'))).toBe(true);
       const toml = readFileSync(join(ws, 'Extension.toml'), 'utf-8');
       expect(toml).toMatch(/\[template\]/);
       expect(toml).toMatch(/\[resources\]/);
@@ -130,14 +192,17 @@ describe('scaffoldDraftWorkspace (minimal)', () => {
   });
 
   test('代码型 + 模板组合仍生成 __init__.py', () => {
+    seedUnifiedTemplate();
     const ws = tmpdirAt('workspace-mixed');
     try {
-      scaffoldDraftWorkspace(
-        ws,
-        { extensionId: 'Mixed', name: '混合', description: '代码+模板', types: ['api', 'template'] },
-        'minimal',
-      );
+      scaffoldDraftWorkspace(ws, {
+        extensionId: 'Mixed',
+        name: '混合',
+        description: '代码+模板',
+        types: ['api', 'template'],
+      });
       expect(existsSync(join(ws, '__init__.py'))).toBe(true);
+      expect(existsSync(join(ws, 'Templates'))).toBe(true);
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -151,3 +216,7 @@ describe('hasCodeType', () => {
     expect(hasCodeType(['template', 'resources'])).toBe(false);
   });
 });
+
+function tmpdirAt(prefix: string): string {
+  return mkdtempSync(join(tmpdir(), `studio-${prefix}-`));
+}
