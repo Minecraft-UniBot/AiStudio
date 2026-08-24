@@ -61,6 +61,9 @@ function loadConfig(): StudioConfig {
       // 思考模型长时间无输出时默认 chunkTimeout（30s）会提前掐断，这里统一调大。
       timeout_ms: 900_000,       // 整次请求超时（opencode 默认 300s）
       chunk_timeout_ms: 300_000, // 流式块间隔超时（opencode 默认 30s）
+      // 会话僵尸看门狗：busy 状态下超过该时长无任何会话事件即判定异常终止
+      //（需显著大于 chunk_timeout_ms；环境变量 UNIBOT_STUDIO_SESSION_STALL_MS 可覆盖）
+      stall_timeout_ms: 1_200_000,
     },
     unibot_env: {
       repo_owner: process.env.UNIBOT_REPO_OWNER ?? 'MineJPGcraft',
@@ -107,6 +110,9 @@ function loadConfig(): StudioConfig {
   if (process.env.UNIBOT_STUDIO_DATA_DIR) merged.data_dir = process.env.UNIBOT_STUDIO_DATA_DIR;
   if (process.env.UNIBOT_STUDIO_STATIC_DIR) merged.static_dir = process.env.UNIBOT_STUDIO_STATIC_DIR;
   if (process.env.OPENCODE_BIN) merged.opencode.bin = process.env.OPENCODE_BIN;
+  if (process.env.UNIBOT_STUDIO_SESSION_STALL_MS) {
+    merged.opencode.stall_timeout_ms = Number(process.env.UNIBOT_STUDIO_SESSION_STALL_MS);
+  }
   if (process.env.UNIBOT_DIR) {
     merged.unibot_dir = process.env.UNIBOT_DIR;
     merged.extensions_dir = join(process.env.UNIBOT_DIR, 'Extensions');

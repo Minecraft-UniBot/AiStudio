@@ -18,7 +18,7 @@ import { runValidation } from '../studio/validation';
 import { startCoding } from '../ai/pipeline';
 import { draftIdForSession, getDraftSessionIds, getWorkspaces } from '../studio/sessions';
 import { logger } from '../core/logger';
-import { docsAllowlistPaths, marketAllowlistPaths, unibotEnvPython, validationScriptPath } from '../core/config';
+import { config, docsAllowlistPaths, marketAllowlistPaths, unibotEnvPython, validationScriptPath } from '../core/config';
 import type { PermissionRequest, QuestionRequest, StudioEvent } from '../core/types';
 
 const WS_CLIENTS = new Set<ServerWebSocket<unknown>>();
@@ -351,6 +351,116 @@ const IDLE_DEDUP_MS = 2000;
 const LAST_SETTLED = new Map<string, number>();
 const SETTLE_THROTTLE_MS = 60_000;
 
+// ===== 会话异常终止检测（「一直转圈圈」修复） =====
+//
+// `GET /session/status` 返回的是 opencode 进程的**内存**状态表：
+// - opencode 崩溃重启（gateway 退避重启）后状态表为空，且新进程不会为已死掉的
+//   运行补发 idle 事件 → 旧逻辑（只认 idle）永远检测不到，草稿永久停在
+//   planning/coding，前端一直转圈；
+// - 会话内部异常终止（generate 循环挂起/未收敛）时状态表可能永远停在 busy。
+// 因此协调循环按以下信号判定「会话已异常终止」：
+// 1. 会话连续 SESSION_MISS_ROUNDS 轮不在状态表（opencode 重启/会话消失）；
+// 2. opencode 连续 SESSION_MISS_ROUNDS 轮不可用/状态查询失败（进程死亡超过重启窗口）；
+// 3. 会话 busy/retry 但超过 stall_timeout_ms 无任何会话事件（僵尸运行）。
+// 判定为异常终止后：回退草稿到 draft（保留 phase 供「继续」恢复），记录错误供
+// 前端横幅展示；并尽力调用 session.abort 清理 opencode 侧状态（失败忽略）。
+
+/** 会话连续缺失/不可用的判定轮数（协调循环 2s 一轮，3 轮 ≈ 6s，规避「状态先行」与 promptAsync 注册 busy 之间的竞态窗口） */
+export const SESSION_MISS_ROUNDS = 3;
+
+/** 会话连续缺失/不可用计数（key: draftId；达到 SESSION_MISS_ROUNDS 判定终止） */
+const SESSION_MISSES = new Map<string, number>();
+
+/** 草稿最近一次收到会话事件的时间（key: draftId；SSE onSseEvent 持续刷新） */
+const LAST_ACTIVITY = new Map<string, number>();
+
+/** 会话探针结果（由 /session/status 状态表或查询异常归一化而来） */
+export type SessionProbe =
+  | { kind: 'idle' }        // 状态表显示空闲 → 正常结算路径
+  | { kind: 'running' }     // busy / retry → 运行中（需做僵尸看门狗检查）
+  | { kind: 'missing' }     // 会话不在状态表（opencode 重启 / 会话已消失）
+  | { kind: 'unreachable' }; // opencode 不可用 / 状态查询失败
+
+/** 协调循环对单个运行态草稿的处置决策 */
+export type ReconcileDecision =
+  | { action: 'none' }
+  | { action: 'settle-idle' }
+  | { action: 'count-miss'; misses: number }
+  | { action: 'settle-interrupted'; reason: string };
+
+/**
+ * 结算判定（导出供测试）：按探针结果、连续缺失计数与最后活动时间决定处置。
+ * 纯函数，不触碰草稿与 opencode；reconcileStuckDrafts 只做适配。
+ *
+ * - idle → settle-idle（正常结算，缺失计数清零由调用方处理）
+ * - running → 超过看门狗阈值无活动才判定终止；否则观望
+ * - missing / unreachable → 连续计数，达到 SESSION_MISS_ROUNDS 判定终止
+ */
+export function decideReconcile(input: {
+  probe: SessionProbe;
+  misses: number;
+  last_activity: number | null;
+  status_updated_at: number;
+  now: number;
+  stall_timeout_ms: number;
+}): ReconcileDecision {
+  const { probe, now, stall_timeout_ms } = input;
+  if (probe.kind === 'idle') return { action: 'settle-idle' };
+  if (probe.kind === 'running') {
+    // 活动基线：最后一次会话事件与「进入运行态」取较新者（后者兜底
+    // promptAsync 失败/事件全丢的场景；时间戳不可解析时按当前时间，不误判）
+    const updated = Number.isFinite(input.status_updated_at) ? input.status_updated_at : now;
+    const baseline = Math.max(input.last_activity ?? 0, updated);
+    if (now - baseline > stall_timeout_ms) {
+      return {
+        action: 'settle-interrupted',
+        reason:
+          `会话已超过 ${Math.round(stall_timeout_ms / 60_000)} 分钟无任何输出或事件` +
+          '（可能已异常终止），已自动停止。可直接发消息继续，AI 会接着上下文工作。',
+      };
+    }
+    return { action: 'none' };
+  }
+  const misses = input.misses + 1;
+  if (misses < SESSION_MISS_ROUNDS) return { action: 'count-miss', misses };
+  return {
+    action: 'settle-interrupted',
+    reason:
+      probe.kind === 'missing'
+        ? 'OpenCode 会话已不存在（服务重启或会话异常终止），本轮生成被中断。' +
+          '可直接发消息继续，AI 会接着上下文工作。'
+        : 'OpenCode 服务不可用，本轮生成被中断。待服务恢复后可直接发消息继续。',
+  };
+}
+
+/** 会话异常终止的统一结算：回退运行态 + 记录错误 + 尽力中止 opencode 侧会话 */
+async function settleInterruptedDraft(
+  draftId: string,
+  sessionId: string,
+  reason: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  logger.warn('events', '会话异常终止，回退草稿运行状态', {
+    draft_id: draftId,
+    session_id: sessionId,
+    reason,
+    ...detail,
+  });
+  // 状态先行（与 abort 端点一致）：先置回 draft 再调 opencode，
+  // 让后续到达的 idle/abort 事件看到非阶段状态，不会被误判为「阶段完成」
+  updateDraft(draftId, { status: 'draft', error: reason });
+  broadcast({ type: 'draft.updated', draft_id: draftId, status: 'draft' });
+  // 尽力清理 opencode 侧运行（进程已死/会话已消失时会失败，忽略即可）
+  try {
+    await opencode.getClient().session.abort({
+      path: { id: sessionId },
+      query: { directory: draftWorkspace(draftId) },
+    });
+  } catch {
+    // opencode 不可用或会话不存在：无需处理
+  }
+}
+
 /**
  * 编码完成后自动执行机械校验（AGENT.md 3.5：不再有独立审核 AI，校验流水线把关）：
  * - 校验通过 → ready（可一键发布）
@@ -405,12 +515,16 @@ async function settleCodingAndValidate(draftId: string): Promise<void> {
 
 /**
  * 阶段状态调和（协调循环兜底）：
- * 草稿停留在阶段状态（planning / coding）但对应 opencode 会话实际已空闲时，
- * 按会话状态主动结算推进流水线，避免「一直显示运行中」。
- * 覆盖两类场景：
- * - SSE idle 事件丢失 / 订阅断开的间隙
- * - 后端重启后：opencode 会话已空闲不会重发 idle 事件，草稿会永久停在阶段状态，
- *   只能靠这里按 /session/status 兜底结算（planning→coding、coding→机械校验）。
+ * 草稿停留在阶段状态（planning / coding）时，按 opencode 会话真实状态主动处置，
+ * 避免「一直显示运行中」（前端转圈）。覆盖四类场景：
+ * - 会话已空闲（SSE idle 事件丢失 / 订阅断开间隙 / 后端重启后 opencode 不重发 idle）
+ *   → 正常结算推进流水线（planning→coding、coding→机械校验）
+ * - 会话不在 /session/status 状态表（opencode 崩溃重启后内存表为空 / 会话已消失）
+ *   → 连续 SESSION_MISS_ROUNDS 轮后判定异常终止，回退 draft
+ * - opencode 不可用或状态查询持续失败（进程死亡且重启未完成/超过重启上限）
+ *   → 同上判定异常终止
+ * - 会话 busy/retry 但超过看门狗阈值无任何事件（僵尸运行）
+ *   → 判定异常终止，回退 draft 并尽力 abort
  */
 async function reconcileStuckDrafts(): Promise<void> {
   let drafts;
@@ -419,34 +533,76 @@ async function reconcileStuckDrafts(): Promise<void> {
   } catch {
     return;
   }
+  const running = new Set<string>();
   for (const draft of drafts) {
     if (!['planning', 'coding'].includes(draft.status)) continue;
     const sessionId = draft.session_id;
     if (!sessionId) continue;
+    running.add(draft.id);
+
+    // 探针：优先查 /session/status；opencode 不可用或查询失败视为 unreachable
+    //（瞬时故障由连续计数吸收，不会立即误判）
+    let probe: SessionProbe;
+    let probe_detail: Record<string, unknown> = {};
     try {
       const client = opencode.getClient();
       const res = await client.session.status({
         query: { directory: draftWorkspace(draft.id) },
       });
       const statuses = (res.data ?? {}) as Record<string, { type?: string }>;
-      if (statuses[sessionId]?.type === 'idle') {
-        // 结算节流：刚处理过 idle 结算的会话（如机械校验进行中）不再由协调循环
-        // 重复结算，避免 2s 轮询在结算动作完成前反复触发（见 LAST_SETTLED 注释）
-        const key = `${draft.id}:${sessionId}`;
-        if (Date.now() - (LAST_SETTLED.get(key) ?? 0) < SETTLE_THROTTLE_MS) continue;
-        logger.info('events', '调和：会话已空闲但草稿仍停留在阶段状态，主动结算', {
-          draft_id: draft.id,
-          status: draft.status,
-          session_id: sessionId,
-        });
-        await settleSessionState(draft.id, sessionId, { type: 'session.idle' } as StudioEvent);
+      const state = statuses[sessionId]?.type;
+      if (state === 'idle') probe = { kind: 'idle' };
+      else if (state === 'busy' || state === 'retry') probe = { kind: 'running' };
+      else {
+        probe = { kind: 'missing' };
+        probe_detail = { status_map_sessions: Object.keys(statuses).length };
       }
     } catch (e) {
-      logger.debug('events', '阶段状态调和失败（忽略）', {
-        draft_id: draft.id,
-        error: (e as Error).message,
-      });
+      probe = { kind: 'unreachable' };
+      probe_detail = { error: (e as Error).message };
     }
+
+    const decision = decideReconcile({
+      probe,
+      misses: SESSION_MISSES.get(draft.id) ?? 0,
+      last_activity: LAST_ACTIVITY.get(draft.id) ?? null,
+      status_updated_at: Date.parse(draft.updated_at),
+      now: Date.now(),
+      stall_timeout_ms: config.opencode.stall_timeout_ms,
+    });
+
+    if (decision.action === 'none' || decision.action === 'count-miss') {
+      if (decision.action === 'count-miss') SESSION_MISSES.set(draft.id, decision.misses);
+      else SESSION_MISSES.delete(draft.id);
+      continue;
+    }
+    SESSION_MISSES.delete(draft.id);
+
+    if (decision.action === 'settle-interrupted') {
+      await settleInterruptedDraft(draft.id, sessionId, decision.reason, {
+        probe: probe.kind,
+        ...probe_detail,
+      });
+      continue;
+    }
+
+    // settle-idle：结算节流（刚处理过 idle 结算的会话——如机械校验进行中——
+    // 不再由协调循环重复结算，避免 2s 轮询在结算动作完成前反复触发，见 LAST_SETTLED 注释）
+    const key = `${draft.id}:${sessionId}`;
+    if (Date.now() - (LAST_SETTLED.get(key) ?? 0) < SETTLE_THROTTLE_MS) continue;
+    logger.info('events', '调和：会话已空闲但草稿仍停留在阶段状态，主动结算', {
+      draft_id: draft.id,
+      status: draft.status,
+      session_id: sessionId,
+    });
+    await settleSessionState(draft.id, sessionId, { type: 'session.idle' } as StudioEvent);
+  }
+  // 清理已离开运行态/已删除草稿的计数与活动标记（防 Map 缓慢增长）
+  for (const key of [...SESSION_MISSES.keys()]) {
+    if (!running.has(key)) SESSION_MISSES.delete(key);
+  }
+  for (const key of [...LAST_ACTIVITY.keys()]) {
+    if (!running.has(key)) LAST_ACTIVITY.delete(key);
   }
 }
 
@@ -585,6 +741,9 @@ async function subscribeWorkspace(workspace: string) {
           if (!sessionId) return;
           const draftId = draftIdForSession(sessionId);
           if (!draftId) return;
+          // 会话僵尸看门狗的活动信号：该会话有任何事件（消息/部件/状态/权限/提问）
+          // 即刷新活动时间，协调循环据此判定 busy 是否真的还在推进
+          LAST_ACTIVITY.set(draftId, Date.now());
           const ev = normalize(raw);
           if (!ev) return;
           logger.debug('events', `收到事件 ${ev.type}`, { draft_id: draftId });

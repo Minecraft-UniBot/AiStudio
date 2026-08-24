@@ -273,6 +273,13 @@ export interface StudioConfig {
     timeout_ms: number;
     /** LLM 流式块间隔超时（毫秒），注入 provider.options.chunkTimeout */
     chunk_timeout_ms: number;
+    /**
+     * 会话僵尸看门狗阈值（毫秒）：草稿处于 planning/coding 且会话状态为
+     * busy/retry 期间，超过该时长无任何会话事件（消息/部件/状态）即判定
+     * 会话异常终止，回退草稿状态避免前端永久转圈。需显著大于 chunk_timeout_ms
+     * （流式块超时会触发 retry 事件重置计时），默认 20 分钟。
+     */
+    stall_timeout_ms: number;
   };
   /** UniBot 测试环境：GitHub Releases 来源与本地目录 */
   unibot_env: {

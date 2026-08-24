@@ -43,8 +43,18 @@ opencode 在会话空闲时成对下发 `session.status{idle}` 与 `session.idle
 - **结算节流**：60s 内已结算过的会话不再由协调循环重复触发（机械校验期间 status 仍停在
   coding，2s 轮询会重复看到「阶段状态 + idle」）
 - **协调循环兜底**：每 2s 为新草稿建立按目录的 SSE 订阅、关闭已删草稿的订阅、清理去重标记；
-  并对「停留在 planning/coding 但会话已空闲」的草稿主动结算
+  并对「停留在 planning/coding」的草稿按 `/session/status` 探针主动处置
   （覆盖 SSE 断线间隙与后端重启后不重发 idle 的场景）
+- **会话异常终止检测**（「一直转圈圈」修复，判定逻辑集中在 `decideReconcile` 纯函数，
+  有单元测试）：`/session/status` 是 opencode 的**内存**状态表，进程崩溃重启后为空且
+  不会补发 idle——只认 idle 的旧逻辑永远检测不到。现在协调循环每轮归一化探针
+  （idle / running / missing / unreachable）后决策：
+  - 会话不在状态表（missing）或 opencode 不可用（unreachable）连续 3 轮（≈6s，
+    规避「状态先行」与 promptAsync 注册 busy 的竞态）→ `settleInterruptedDraft`：
+    回退 draft（保留 phase 供继续）、记录错误横幅、尽力 `session.abort`
+  - busy/retry 但超过 `stall_timeout_ms`（默认 20 分钟，`UNIBOT_STUDIO_SESSION_STALL_MS`
+    可调）无任何会话事件（SSE onSseEvent 刷新 `LAST_ACTIVITY`）→ 僵尸运行，同上结算；
+    活动基线取「最后事件时间」与「进入运行态时间」（`updated_at`）较新者，兜底事件全丢场景
 - **SSE 快速重订**：订阅意外断开时 500ms 内即重订，不等下一轮协调循环
 
 ## 三、稳定性要点（含「输出莫名停止」排查结论）
@@ -67,7 +77,7 @@ opencode 在会话空闲时成对下发 `session.status{idle}` 与 `session.idle
 
 - 后端重启恢复：中断的机械校验落盘为 failed（interrupted 步骤）；planning/coding 草稿由协调循环按会话真实状态结算，不会永久「运行中」
 - abort 先把草稿置回 draft 再调 opencode（MessageAbortedError 不误判为阶段完成）；abort 失败回滚状态
-- promptAsync 发送失败回滚运行态，避免草稿永久停留「进行中」
+- promptAsync 发送失败回滚运行态（创建草稿 / 发消息 / debug 修复三处调用点一致），避免草稿永久停留「进行中」
 - 权限弹窗兜底：`GET /drafts/:id/permissions` 从 opencode 内存补拉待处理权限（SSE 丢事件也能弹出）
 - 前端 store 全量拉取带请求序号守卫（乱序旧响应丢弃）；消息刷新合并防抖（200ms trailing，终态立即）
 

@@ -463,16 +463,27 @@ async function handleRequest(req: Request): Promise<Response> {
         server_context: renderMcServerContext(mcServerInfo),
       }, security);
 
-      await client.session.promptAsync({
-        path: { id: sessionId },
-        body: {
-          parts: [{ type: 'text', text: planningPrompt }],
-          agent: draft.agent,
-          system,
-          model: promptModelChoice(draft),
-        },
-        query: { directory: workspace },
-      });
+      try {
+        await client.session.promptAsync({
+          path: { id: sessionId },
+          body: {
+            parts: [{ type: 'text', text: planningPrompt }],
+            agent: draft.agent,
+            system,
+            model: promptModelChoice(draft),
+          },
+          query: { directory: workspace },
+        });
+      } catch (e) {
+        // 发送失败回滚「状态先行」留下的 planning 运行态（与 messages / debug 端点
+        // 一致），否则草稿永久停在「规划中」，前端一直转圈且无法发消息恢复
+        updateDraft(draft.id, {
+          status: 'draft',
+          error: `规划提示词发送失败：${(e as Error).message}。请打开草稿重新发送消息继续`,
+        });
+        broadcast({ type: 'draft.updated', draft_id: draft.id, status: 'draft' });
+        throw e;
+      }
       return json({ draft: readDraft(draft.id), session_id: sessionId });
     } catch (e) {
       if (e instanceof DraftError) return errorJson(e.message, 1, 400);
