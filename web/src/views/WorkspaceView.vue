@@ -12,6 +12,7 @@ import DraftFileTree from '@/components/studio/DraftFileTree.vue'
 import ResultSummary from '@/components/studio/ResultSummary.vue'
 import ValidationPanel from '@/components/studio/ValidationPanel.vue'
 import PublishDialog from '@/components/studio/PublishDialog.vue'
+import MarketDialog from '@/components/studio/MarketDialog.vue'
 import Dialog from '@/components/ui/Dialog.vue'
 import ResizablePanel from '@/components/ui/ResizablePanel.vue'
 import Button from '@/components/ui/Button.vue'
@@ -39,6 +40,8 @@ const fileViewerOpen = ref(false)
 const repairing = ref(false)
 const publishing = ref(false)
 const publishOpen = ref(false)
+/** 上传插件市场对话框状态 */
+const marketOpen = ref(false)
 /** 回退确认对话框状态 */
 const reverting = ref(false)
 const revertTarget = ref('')
@@ -315,6 +318,12 @@ function openPublish() {
   publishOpen.value = true
 }
 
+/** 打开上传插件市场对话框（登录态检测 + 步骤进度，见 MarketDialog） */
+function openMarket() {
+  if (!canPublish.value) return
+  marketOpen.value = true
+}
+
 async function confirmPublish() {
   publishing.value = true
   try {
@@ -513,6 +522,7 @@ onUnmounted(() => {
                 :can-publish="canPublish"
                 :publishing="publishing"
                 @publish="openPublish"
+                @market="openMarket"
               />
             </div>
 
@@ -588,6 +598,9 @@ onUnmounted(() => {
       :publishing="publishing"
       @confirm="confirmPublish"
     />
+
+    <!-- 上传插件市场：登录态检测 + 步骤进度 + 结果链接 -->
+    <MarketDialog v-model="marketOpen" :draft="draft" />
 
     <!-- 回退确认：恢复文件状态和对话记录到该消息之前 -->
     <Dialog

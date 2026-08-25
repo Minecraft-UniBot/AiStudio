@@ -12,7 +12,7 @@ const props = defineProps({
   publishing: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['publish'])
+const emit = defineEmits(['publish', 'market'])
 
 const types = computed(() => props.draft.types.map((type) => TYPE_LABELS[type]).filter(Boolean))
 const statusLabel = computed(() => STATUS_LABELS[props.draft.status] ?? props.draft.status)
@@ -122,6 +122,47 @@ const inProgressText = computed(() =>
       <p class="publish-hint">
         <Icon icon="lucide:info" width="13" />
         {{ canPublishHint || '发布采用原子交付；目标 ID 已存在时拒绝覆盖。' }}
+      </p>
+    </section>
+
+    <!-- 上传插件市场：生成仓库 → GitHub Release → 市场注册 PR（git/gh 命令行驱动） -->
+    <section class="publish-card">
+      <div class="publish-head">
+        <Icon icon="lucide:store" width="16" class="publish-icon" />
+        <span class="publish-title">上传到插件市场</span>
+      </div>
+      <Button
+        variant="secondary"
+        class="publish-btn"
+        :disabled="!canPublish"
+        @click="emit('market')"
+      >
+        <Icon icon="lucide:store" width="15" />
+        上传到插件市场
+      </Button>
+      <p class="publish-hint">
+        <Icon icon="lucide:info" width="13" />
+        按 Extension.Example 模板生成仓库并推送到 GitHub，创建 Release 后向市场提交注册 PR。
+      </p>
+      <p v-if="draft.market" class="market-status">
+        <Icon
+          :icon="
+            draft.market.status === 'submitted'
+              ? 'lucide:check-circle-2'
+              : draft.market.status === 'failed'
+                ? 'lucide:x-circle'
+                : 'lucide:loader-2'
+          "
+          width="13"
+          :class="{ spin: draft.market.status === 'running' }"
+        />
+        {{
+          draft.market.status === 'submitted'
+            ? '已提交市场 PR'
+            : draft.market.status === 'failed'
+              ? '上次上传失败，点击重新上传'
+              : '市场上传进行中…'
+        }}
       </p>
     </section>
   </div>
@@ -350,6 +391,24 @@ const inProgressText = computed(() =>
 .publish-hint svg {
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.market-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.market-status svg {
+  flex-shrink: 0;
+}
+
+.market-status svg.spin {
+  color: var(--accent);
 }
 
 /* ---------- 动画 ---------- */

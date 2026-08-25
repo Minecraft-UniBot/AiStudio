@@ -66,14 +66,23 @@ function pythonBin(root: string): string {
     : join(root, '.venv', 'bin', 'python');
 }
 
-/** 异步执行子进程，收集输出并支持超时（超时返回 code 124） */
+/** 异步执行子进程，收集输出并支持超时（超时返回 code 124）。
+ * env 可在进程环境之上追加变量（如 gh 的 GH_TOKEN），不替换整个 env 以保留 PATH/HOME。 */
 export function runProcess(
   command: string,
   args: string[],
-  options: { cwd?: string; timeout_ms?: number } = {},
+  options: {
+    cwd?: string;
+    timeout_ms?: number;
+    /** 追加到进程环境的变量 */
+    env?: Record<string, string>;
+  } = {},
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: options.cwd });
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+    });
     let output = '';
     let settled = false;
     const finish = (code: number) => {

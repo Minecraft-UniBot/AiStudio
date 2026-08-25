@@ -10,7 +10,9 @@
  * 带 template.json 元数据标记（防止重复拉取）。路径操作仅限模板目录内。
  */
 import {
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -19,7 +21,7 @@ import {
   writeFileSync,
   statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { config } from '../core/config';
 import { assertDiskSpace } from '../core/disk';
 import { logger } from '../core/logger';
@@ -90,6 +92,11 @@ export function templateDir(templateId: string): string {
 /** 模板目录内扩展根（extension 类型模板的源码根目录） */
 export function templateSourceDir(templateId: string): string {
   return join(templateDir(templateId), 'source');
+}
+
+/** 模板目录内「仓库级」文件根（.github/workflows、LICENSE、README 等，市场上传脚手架用） */
+export function templateRepoDir(templateId: string): string {
+  return join(templateDir(templateId), 'repo');
 }
 
 /** 模板元信息文件 */
@@ -206,6 +213,26 @@ export async function pullTemplate(templateId: string): Promise<TemplateInfo> {
   rmSync(sourceDir, { recursive: true, force: true });
   renameSync(stagedSource, sourceDir);
 
+  // 缓存「仓库级」文件（.github/workflows、LICENSE、README、.gitignore）：
+  // 市场上传脚手架按 Extension.Example 仓库布局生成扩展仓库（含完整打包 workflow），
+  // 这些文件在 entry 子目录之外，且 copyTree 会跳过隐藏目录，需单独复制。
+  // 缺失不致命（老模板缓存/仓库改版），脚手架会退化为不复制这些文件。
+  const repoRoot = dirname(entryDir);
+  const stagedRepo = join(staging, 'repo');
+  mkdirSync(stagedRepo, { recursive: true });
+  try {
+    copyRepoExtras(repoRoot, stagedRepo);
+    // 原子替换 repo 目录（同 source 的 staging -> rename 模式）
+    const repoDir = templateRepoDir(templateId);
+    rmSync(repoDir, { recursive: true, force: true });
+    renameSync(stagedRepo, repoDir);
+  } catch (e) {
+    logger.warn('templates', '缓存模板仓库级文件失败（不影响模板使用）', {
+      template: templateId,
+      error: (e as Error).message,
+    });
+  }
+
   // 写元信息标记
   const now = new Date().toISOString();
   writeFileSync(
@@ -245,6 +272,71 @@ function findEntryDir(extractRoot: string, relativeEntry: string): string | null
     if (cursor) return cursor;
   }
   return null;
+}
+
+/** 仓库级目录白名单（市场上传脚手架需要复刻的 Extension.Example 布局） */
+const REPO_EXTRA_ENTRIES = ['.github', 'LICENSE', 'README.md', '.gitignore'];
+
+/**
+ * 复制模板仓库的「仓库级」文件到目标目录（保留隐藏目录如 .github，
+ * 跳过 .git 与符号链接）。仅复制白名单条目，entry 子目录不重复复制。
+ */
+function copyRepoExtras(repoRoot: string, dest: string): void {
+  for (const name of REPO_EXTRA_ENTRIES) {
+    const src = join(repoRoot, name);
+    if (!existsSync(src) || lstatSync(src).isSymbolicLink()) continue;
+    const st = statSync(src);
+    const target = join(dest, name);
+    if (st.isDirectory()) {
+      copyTreeIncludingHidden(src, target);
+    } else {
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(src, target);
+    }
+  }
+}
+
+/** 与 copyTree 相同，但保留隐藏文件/目录（.github/workflows 必需） */
+function copyTreeIncludingHidden(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src)) {
+    if (entry === '__pycache__' || entry === '.git') continue;
+    const fullSrc = join(src, entry);
+    const fullDest = join(dest, entry);
+    const st = lstatSync(fullSrc);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) copyTreeIncludingHidden(fullSrc, fullDest);
+    else copyFileSync(fullSrc, fullDest);
+  }
+}
+
+/** 模板是否已缓存仓库级文件（市场上传脚手架可用性判定） */
+export function templateRepoExtrasAvailable(templateId: string): boolean {
+  return existsSync(join(templateRepoDir(templateId), '.github', 'workflows'));
+}
+
+/**
+ * 复制模板缓存的「仓库级」文件（.github/workflows、LICENSE、README.md、.gitignore）
+ * 到目标目录（市场上传脚手架用，见 studio/market.ts）。保留隐藏目录（.github）。
+ * 返回实际复制的条目名；缺失的条目静默跳过（老缓存/仓库改版不致命）。
+ */
+export function copyTemplateRepoExtras(templateId: string, destDir: string): string[] {
+  const repoDir = templateRepoDir(templateId);
+  const copied: string[] = [];
+  for (const name of REPO_EXTRA_ENTRIES) {
+    const src = join(repoDir, name);
+    if (!existsSync(src) || lstatSync(src).isSymbolicLink()) continue;
+    const st = statSync(src);
+    const target = join(destDir, name);
+    if (st.isDirectory()) {
+      copyTreeIncludingHidden(src, target);
+    } else {
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(src, target);
+    }
+    copied.push(name);
+  }
+  return copied;
 }
 
 /** 递归复制一棵目录（跳过隐藏/缓存条目；遵循 5.2 的忽略规则，与发布过滤一致） */

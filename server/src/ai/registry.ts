@@ -29,14 +29,14 @@ const MODULES: FeatureModule[] = [
   {
     id: 'market_publish',
     name: '市场发布',
-    description: '从校验通过的草稿生成 Release zip 与市场元数据（暂未实现）',
-    implemented: false,
+    description: '从校验通过的草稿按 Extension.Example 模板生成仓库并推送到 GitHub，创建 Release 后向市场仓库提交注册 PR',
+    implemented: true,
   },
   {
     id: 'git_integration',
     name: 'Git / PR 工作流',
-    description: 'GitHub 仓库创建与 PR 工作流，始终保持人工确认（暂未实现）',
-    implemented: false,
+    description: 'git/gh 命令行驱动：仓库创建、推送、Release 与市场 Pull Request（登录态未就绪时引导用户登录）',
+    implemented: true,
   },
 ];
 

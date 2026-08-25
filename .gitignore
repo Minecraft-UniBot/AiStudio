@@ -114,3 +114,6 @@ dist
 
 # Python
 __pycache__/
+
+# AI
+/AGENT.md

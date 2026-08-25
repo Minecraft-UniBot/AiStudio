@@ -31,6 +31,7 @@ import {
   updateDraft,
 } from './studio/drafts';
 import { publishDraft, PublishError } from './studio/publishing';
+import { getMarketStatus, saveMarketConfig, startMarketPublish, MarketError } from './studio/market';
 import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './opencode/events';
 import { getTools, updateTools } from './ai/tools';
 import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './ai/prompts';
@@ -836,6 +837,23 @@ async function handleRequest(req: Request): Promise<Response> {
           }
           break;
         }
+        case 'market': {
+          // 上传插件市场：后台执行（git/gh 命令行驱动），进度经 market.updated 事件推送
+          if (req.method === 'POST') {
+            assertFeatureEnabled('market_publish');
+            try {
+              const run = startMarketPublish(draftId);
+              return json(run);
+            } catch (e) {
+              if (e instanceof MarketError) return errorJson(e.message, 1, 400);
+              throw e;
+            }
+          }
+          if (req.method === 'GET') {
+            return json(draft.market ?? null);
+          }
+          break;
+        }
       }
     } catch (e) {
       if (e instanceof DraftError) return errorJson(e.message, 404, 404);
@@ -981,8 +999,13 @@ async function handleRequest(req: Request): Promise<Response> {
           data_dir: config.data_dir,
         });
       }
-      // 其余字段（功能开关等）走通用合并保存
-      const next = saveConfig(body as never);
+      // 其余字段（功能开关等）走通用合并保存；market 段（含 GitHub token）
+      // 只能经专用市场接口修改，防止通用 PATCH 篡改 owner/token
+      const patchBody = { ...body } as Record<string, unknown>;
+      delete patchBody.market;
+      delete patchBody.auth;
+      delete patchBody.opencode;
+      const next = saveConfig(patchBody as never);
       return json({
         features: next.features,
         defaults: next.defaults,
@@ -991,6 +1014,26 @@ async function handleRequest(req: Request): Promise<Response> {
         extensions_dir: next.extensions_dir,
         data_dir: next.data_dir,
       });
+    }
+  }
+
+  // ---- 插件市场（git/gh 命令行驱动；配置含 GitHub token，只能经本接口修改） ----
+  if (path === '/api/studio/market') {
+    assertFeatureEnabled('market_publish');
+    if (req.method === 'GET') {
+      return json(await getMarketStatus());
+    }
+    if (req.method === 'PATCH') {
+      try {
+        const body = (await req.json()) as {
+          owner?: string;
+          token?: string;
+          repo_visibility?: 'public' | 'private';
+        };
+        return json(await saveMarketConfig(body));
+      } catch (e) {
+        return errorJson(`保存市场配置失败：${(e as Error).message}`);
+      }
     }
   }
 
@@ -1200,6 +1243,22 @@ for (const draft of listDrafts()) {
       error: undefined,
     });
     logger.warn('draft', '启动恢复：中断的机械校验记录已置为失败', {
+      draft_id: draft.id,
+      extension_id: draft.extension_id,
+    });
+  }
+  // 服务重启前正在执行的市场上传（进程被杀）落盘为 failed：
+  // 避免市场运行记录永久停留在 running，界面误认为仍在进行
+  if (draft.market?.status === 'running') {
+    updateDraft(draft.id, {
+      market: {
+        ...draft.market,
+        status: 'failed',
+        error: '市场上传因服务重启中断，请重新上传（已生成的仓库/Release 会自动复用）',
+        finished_at: new Date().toISOString(),
+      },
+    });
+    logger.warn('draft', '启动恢复：中断的市场上传记录已置为失败', {
       draft_id: draft.id,
       extension_id: draft.extension_id,
     });

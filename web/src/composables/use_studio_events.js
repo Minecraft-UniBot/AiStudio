@@ -110,6 +110,10 @@ export function use_studio_events() {
           // 机械校验完成（自动/手动）：刷新草稿（校验结果与状态流转）
           store.refreshCurrent(event.draft_id)
           break
+        case 'market.updated':
+          // 市场上传进度（步骤状态变化）：刷新草稿（draft.market 实时进度）
+          store.refreshCurrent(event.draft_id)
+          break
         default:
           break
       }

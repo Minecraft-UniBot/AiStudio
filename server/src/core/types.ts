@@ -137,6 +137,8 @@ export interface DraftMeta {
    * 让前端立即呈现回退后的对话；发送新消息时清除。
    */
   revert_message_id?: string | null;
+  /** 最近一次「上传到插件市场」的运行记录（无则为 null；见 studio/market.ts） */
+  market?: MarketRun | null;
   created_at: string;
   updated_at: string;
   published_at: string | null;
@@ -173,6 +175,7 @@ export type StudioEvent =
   | { type: 'question.rejected'; draft_id: string; question_id: string }
   | { type: 'draft.updated'; draft_id: string; status: DraftStatus }
   | { type: 'validation.updated'; draft_id: string; run: ValidationRun }
+  | { type: 'market.updated'; draft_id: string; run: MarketRun }
   | { type: 'unibot-env.updated'; status: UnibotEnvStatus }
   | { type: 'draft.published'; draft_id: string };
 
@@ -223,6 +226,45 @@ export interface PublishRecord {
   revision: string;
   prompt_versions: Record<string, string>;
   published_at: string;
+}
+
+/** 上传插件市场单个步骤的执行结果（对应 studio/market.ts runMarketPublish） */
+export type MarketStepId =
+  | 'precheck'      // 机械校验通过且文件摘要未过期
+  | 'auth'          // 本地 git / GitHub 登录态
+  | 'scaffold'      // 按 Extension.Example 模板生成仓库草稿（含 workflow）
+  | 'commit'        // git init/clone + 提交
+  | 'repo'          // 确保 GitHub 仓库存在（不存在则创建）
+  | 'push'          // 推送到 GitHub
+  | 'release'       // 创建/复用 tag + GitHub Release（触发仓库自带打包 workflow）
+  | 'asset'         // 等待打包 workflow 上传 zip 资产（超时不阻断）
+  | 'market_pr';    // fork 市场仓库、提交元数据、创建/复用 Pull Request
+
+export interface MarketStepResult {
+  id: MarketStepId;
+  name: string;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+  message?: string;
+  detail?: string;
+  duration_ms: number;
+}
+
+/** 一次上传市场的完整运行记录（落盘于草稿元数据，供前端展示进度与结果） */
+export interface MarketRun {
+  id: string;
+  status: 'running' | 'submitted' | 'failed';
+  steps: MarketStepResult[];
+  /** 扩展源码仓库 owner/repo */
+  repo: string | null;
+  /** 本次发布的版本号（读自 Extension.toml） */
+  version: string | null;
+  release_tag: string | null;
+  release_url: string | null;
+  /** 提交到 UniBot.Market 的 Pull Request 地址 */
+  pr_url: string | null;
+  started_at: string;
+  finished_at?: string;
+  error?: string;
 }
 
 /** 工具注册表条目（对应 Plan.md 7.2） */
@@ -293,6 +335,24 @@ export interface StudioConfig {
     fallback_tag: string;
     /** 测试环境目录（共享一份，不随草稿复制） */
     test_dir: string;
+  };
+  /** 插件市场上传（git/gh 命令行驱动，见 studio/market.ts） */
+  market: {
+    /** 扩展源码仓库默认 owner（登录 GitHub 账号；可用环境变量 UNIBOT_MARKET_OWNER 覆盖） */
+    owner: string;
+    /** GitHub 访问令牌（用户在市场设置中粘贴，为空时回退 gh auth 登录态）。
+     *  仅存本地 config 文件；接口只返回是否已配置与尾号，永不下发明文 */
+    token: string;
+    /** 扩展仓库的默认可见性（创建仓库时） */
+    repo_visibility: 'public' | 'private';
+    /** 扩展市场仓库（注册表所在地） */
+    market_repo: string;
+    /** 市场注册表默认分支 */
+    market_branch: string;
+    /** 等待打包 workflow 上传 Release 资产的超时（毫秒） */
+    asset_timeout_ms: number;
+    /** 市场仓库本地克隆/缓存目录（<data_dir>/market） */
+    work_dir: string;
   };
   features: {
     test_tools: boolean;

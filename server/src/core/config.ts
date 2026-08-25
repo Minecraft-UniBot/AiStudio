@@ -72,6 +72,19 @@ function loadConfig(): StudioConfig {
       fallback_tag: 'v1.0.1',
       test_dir: join(dataDir, 'unibot'),
     },
+    market: {
+      // 登录 GitHub 后自动回填（见 market.ts 的 ensureMarketStatus 检测），
+      // 环境变量 UNIBOT_MARKET_OWNER 可显式覆盖（如组织账号）
+      owner: process.env.UNIBOT_MARKET_OWNER ?? '',
+      // GitHub PAT（用户粘贴；回退顺序 token > gh auth login 登录态）
+      token: '',
+      repo_visibility: 'public',
+      market_repo: process.env.UNIBOT_MARKET_REPO ?? 'MineJPGcraft/UniBot.Market',
+      market_branch: 'main',
+      // 打包 workflow 通常 1-2 分钟内完成；超时不判失败（资产可稍后由市场定时任务抓取）
+      asset_timeout_ms: 5 * 60_000,
+      work_dir: join(dataDir, 'market'),
+    },
     features: {
       test_tools: true,
       mc_test_environment: true,
@@ -98,6 +111,7 @@ function loadConfig(): StudioConfig {
     ...disk,
     opencode: { ...base.opencode, ...(disk.opencode ?? {}) },
     unibot_env: { ...base.unibot_env, ...(disk.unibot_env ?? {}) },
+    market: { ...base.market, ...(disk.market ?? {}) },
     features: { ...base.features, ...(disk.features ?? {}) },
     defaults: { ...base.defaults, ...(disk.defaults ?? {}) },
     auth: { ...base.auth, ...(disk.auth ?? {}) },
@@ -113,6 +127,9 @@ function loadConfig(): StudioConfig {
   if (process.env.UNIBOT_STUDIO_SESSION_STALL_MS) {
     merged.opencode.stall_timeout_ms = Number(process.env.UNIBOT_STUDIO_SESSION_STALL_MS);
   }
+  // 市场上传相关（owner 由登录检测回填，环境变量显式指定时优先）
+  if (process.env.UNIBOT_MARKET_OWNER) merged.market.owner = process.env.UNIBOT_MARKET_OWNER;
+  if (process.env.UNIBOT_MARKET_REPO) merged.market.market_repo = process.env.UNIBOT_MARKET_REPO;
   if (process.env.UNIBOT_DIR) {
     merged.unibot_dir = process.env.UNIBOT_DIR;
     merged.extensions_dir = join(process.env.UNIBOT_DIR, 'Extensions');
@@ -153,6 +170,7 @@ export function saveConfig(patch: Partial<StudioConfig>): StudioConfig {
     ...patch,
     opencode: { ...config.opencode, ...(patch.opencode ?? {}) },
     unibot_env: { ...config.unibot_env, ...(patch.unibot_env ?? {}) },
+    market: { ...config.market, ...(patch.market ?? {}) },
     features: { ...config.features, ...(patch.features ?? {}) },
     defaults: { ...config.defaults, ...(patch.defaults ?? {}) },
     auth: { ...config.auth, ...(patch.auth ?? {}) },

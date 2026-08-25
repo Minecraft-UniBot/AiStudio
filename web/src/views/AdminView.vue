@@ -1,6 +1,6 @@
 <script setup>
 // 平台设置：功能开关、OpenCode 工具注册表、提示词模板展示
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { api } from '@/utils/api'
@@ -8,6 +8,8 @@ import { useStudioStore } from '@/stores/studio'
 import { use_toast } from '@/composables/use_toast'
 import Button from '@/components/ui/Button.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
+import Input from '@/components/ui/Input.vue'
+import Select from '@/components/ui/Select.vue'
 import Badge from '@/components/ui/Badge.vue'
 import UnibotDirSetupDialog from '@/components/studio/UnibotDirSetupDialog.vue'
 import CustomProviderDialog from '@/components/studio/CustomProviderDialog.vue'
@@ -27,11 +29,19 @@ const dirSetupOpen = ref(false)
 const providerDialogOpen = ref(false)
 const removingProvider = ref('')
 
+// 插件市场设置：登录态检测 + token / owner / 仓库可见性
+const marketStatus = ref(null)
+const marketToken = ref('')
+const marketOwner = ref('')
+const marketVisibility = ref('public')
+const marketSaving = ref(false)
+
 onMounted(async () => {
   store.fetchStatus()
   await loadAll()
   // 自定义提供商列表（用于区分内置 Zen 网关与自定义项）；失败不阻塞设置页
   store.fetchCustomProviders().catch(() => {})
+  loadMarketStatus()
 })
 
 /** 是否为自定义提供商（可删除） */
@@ -103,6 +113,46 @@ function permissionVariant(permission) {
   if (permission === 'ask') return 'warning'
   return 'neutral'
 }
+
+// ===== 插件市场设置 =====
+
+/** 拉取市场登录态/配置（git 身份、gh 登录、token 尾号、owner） */
+async function loadMarketStatus() {
+  try {
+    marketStatus.value = await store.fetchMarketStatus()
+    marketOwner.value = marketStatus.value?.owner ?? ''
+    marketVisibility.value = marketStatus.value?.repo_visibility ?? 'public'
+    // 不预填 token（永不下发明文；留空表示不修改）
+    marketToken.value = ''
+  } catch (e) {
+    toast_error(e.message)
+  }
+}
+
+/** 保存市场配置（token 留空表示保持原样） */
+async function saveMarketConfig() {
+  marketSaving.value = true
+  try {
+    const patch = { owner: marketOwner.value, repo_visibility: marketVisibility.value }
+    if (marketToken.value.trim()) patch.token = marketToken.value.trim()
+    marketStatus.value = await store.saveMarketConfig(patch)
+    marketToken.value = ''
+    toast_success('市场配置已保存')
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    marketSaving.value = false
+  }
+}
+
+/** 登录状态徽章 */
+const marketBadge = computed(() => {
+  const s = marketStatus.value
+  if (!s) return { label: '检测中…', variant: 'neutral' }
+  return s.ready
+    ? { label: '已就绪', variant: 'success' }
+    : { label: '未就绪', variant: 'warning' }
+})
 </script>
 
 <template>
@@ -154,18 +204,18 @@ function permissionVariant(permission) {
               <small>备用方案，暂未实现</small>
             </div>
           </label>
-          <label class="feature-item disabled">
-            <Checkbox v-model="settings.features.market_publish" disabled />
+          <label class="feature-item">
+            <Checkbox v-model="settings.features.market_publish" />
             <div class="feature-text">
               <span>市场发布</span>
-              <small>暂未实现</small>
+              <small>按 Extension.Example 模板生成仓库并推送到 GitHub，创建 Release 后向市场提交注册 PR</small>
             </div>
           </label>
-          <label class="feature-item disabled">
-            <Checkbox v-model="settings.features.git_integration" disabled />
+          <label class="feature-item">
+            <Checkbox v-model="settings.features.git_integration" />
             <div class="feature-text">
               <span>Git / PR 工作流</span>
-              <small>暂未实现</small>
+              <small>git/gh 命令行驱动：仓库创建、推送、Release 与市场 Pull Request（未登录时引导登录）</small>
             </div>
           </label>
         </div>
@@ -307,6 +357,86 @@ function permissionVariant(permission) {
             <dt>平台数据</dt>
             <dd class="mono">{{ settings?.data_dir ?? store.status?.data_dir ?? '~/.unibot-studio' }}</dd>
           </dl>
+        </div>
+      </section>
+
+      <!-- 插件市场：登录态检测 + GitHub PAT / owner / 仓库可见性 -->
+      <section class="card">
+        <header class="card-top">
+          <span class="card-icon"><Icon icon="lucide:store" width="16" /></span>
+          <div class="card-titles">
+            <h3>插件市场</h3>
+            <p>上传扩展到插件市场需要 GitHub 登录；未登录时按下方指引完成后再上传</p>
+          </div>
+          <Badge :variant="marketBadge.variant">{{ marketBadge.label }}</Badge>
+        </header>
+        <div class="card-body">
+          <!-- 登录状态 -->
+          <div class="item-list">
+            <div class="row-item">
+              <div class="row-main">
+                <div class="row-title">
+                  <span>GitHub 登录</span>
+                  <Badge :variant="marketStatus?.auth_source ? 'success' : 'danger'">
+                    {{
+                      marketStatus?.auth_source === 'token'
+                        ? `PAT 令牌（…${marketStatus?.token_tail}）`
+                        : marketStatus?.auth_source === 'gh'
+                          ? 'gh 已登录'
+                          : '未登录'
+                    }}
+                  </Badge>
+                </div>
+                <small class="row-note">
+                  git 身份 {{ marketStatus?.git_configured ? '已配置' : '未配置' }} · gh CLI
+                  {{
+                    marketStatus?.gh_available
+                      ? marketStatus?.gh_authed
+                        ? '已登录'
+                        : '未登录'
+                      : '未安装'
+                  }}
+                </small>
+              </div>
+            </div>
+          </div>
+
+          <!-- 未就绪引导 -->
+          <div v-if="marketStatus && !marketStatus.ready && marketStatus.guidance" class="market-guide">
+            <Icon icon="lucide:info" width="14" />
+            <pre class="market-guide-text">{{ marketStatus.guidance }}</pre>
+          </div>
+
+          <!-- 配置表单 -->
+          <div class="market-form">
+            <label class="field">
+              <span class="field-label">GitHub 账号（owner）</span>
+              <Input v-model="marketOwner" placeholder="自动检测；组织账号可手动填写" />
+            </label>
+            <label class="field">
+              <span class="field-label">Personal Access Token（可选，留空保持原样）</span>
+              <Input v-model="marketToken" type="password" placeholder="ghp_…（需 repo 与 workflow 权限）" />
+            </label>
+            <label class="field">
+              <span class="field-label">扩展仓库可见性</span>
+              <Select
+                v-model="marketVisibility"
+                :options="[
+                  { value: 'public', label: '公开（public）' },
+                  { value: 'private', label: '私有（private）' },
+                ]"
+              />
+            </label>
+            <div class="form-actions">
+              <Button variant="primary" size="sm" :loading="marketSaving" @click="saveMarketConfig">
+                <Icon icon="lucide:save" width="14" /> {{ marketSaving ? '保存中…' : '保存市场配置' }}
+              </Button>
+            </div>
+          </div>
+
+          <small class="row-note">
+            市场仓库：{{ marketStatus?.market_repo ?? 'MineJPGcraft/UniBot.Market' }}（注册表所在地）；token 仅存本机配置，接口永不下发明文。
+          </small>
         </div>
       </section>
       </div>
@@ -663,5 +793,56 @@ function permissionVariant(permission) {
 
 .dir-cell {
   color: var(--text);
+}
+
+/* ---- 插件市场 ---- */
+.market-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--warning-soft);
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+}
+
+.market-guide svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.market-guide-text {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: #92400e;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.market-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

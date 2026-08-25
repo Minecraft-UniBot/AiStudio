@@ -39,6 +39,8 @@ export const useStudioStore = defineStore('studio', () => {
   const sessionRetry = ref(null)
   const pendingPermissions = ref([])
   const pendingQuestions = ref([])
+  // 插件市场：登录态/配置状态（GET/PATCH /market）+ 当前草稿的上传运行记录（draft.market）
+  const marketStatus = ref(null)
 
   // ---- 状态 ----
   async function fetchStatus() {
@@ -264,6 +266,33 @@ export const useStudioStore = defineStore('studio', () => {
     return await api(`/drafts/${id}/publish`, { method: 'POST' })
   }
 
+  // ---- 插件市场 ----
+  /** 拉取市场登录态/配置（git 身份、gh 登录、token、owner 解析） */
+  async function fetchMarketStatus() {
+    try {
+      marketStatus.value = await api('/market')
+    } catch (e) {
+      error.value = e.message
+    }
+    return marketStatus.value
+  }
+
+  /** 保存市场配置（token / owner / 仓库可见性），返回刷新后的状态（脱敏） */
+  async function saveMarketConfig(patch) {
+    marketStatus.value = await api('/market', { method: 'PATCH', body: patch })
+    return marketStatus.value
+  }
+
+  /** 启动上传插件市场（后台执行，进度经 market.updated 事件推送） */
+  async function startMarketPublish(id) {
+    return await api(`/drafts/${id}/market`, { method: 'POST' })
+  }
+
+  /** 拉取当前草稿的市场上传运行记录（断线重连后的兜底） */
+  async function fetchMarketRun(id) {
+    return await api(`/drafts/${id}/market`)
+  }
+
   // ---- 权限 / 问题 ----
   async function replyPermission(id, permissionId, response) {
     await api(`/drafts/${id}/permissions/${permissionId}`, {
@@ -386,6 +415,7 @@ export const useStudioStore = defineStore('studio', () => {
     sessionRetry,
     pendingPermissions,
     pendingQuestions,
+    marketStatus,
     opencodeAvailable,
     fetchStatus,
     fetchOptions,
@@ -418,6 +448,10 @@ export const useStudioStore = defineStore('studio', () => {
     checkValidation,
     syncUnibotEnv,
     publish,
+    fetchMarketStatus,
+    saveMarketConfig,
+    startMarketPublish,
+    fetchMarketRun,
     replyPermission,
     replyQuestion,
     rejectQuestion,

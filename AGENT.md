@@ -1,6 +1,6 @@
 # UniBot Extension Studio
 
-> 状态：核心闭环已上线运行（创建 → 规划 → 编码（AI 测试工具自测）→ 机械校验 → 一键发布），并有单文件可执行版发布流水线
+> 状态：核心闭环已上线运行（创建 → 规划 → 编码（AI 测试工具自测）→ 机械校验 → 一键发布 → 上传插件市场），并有单文件可执行版发布流水线
 > 本文档描述**当前实际实现**，是开发/维护本目录的唯一依据；历史规划细节见 Git 历史
 > 前端编码规范：见「八、前端结构与编码规范」（原 `Frontend.md` 已并入）
 
@@ -13,7 +13,7 @@
 - 后端是唯一可信边界：浏览器不直连 OpenCode、不接触其口令；AI 只能操作草稿工作区
 - 结果导向：普通用户只接触功能摘要、使用方式与检查结果；源码/Diff/日志收在技术详情
 
-不做：NoneBot 插件/渲染器市场发布、Git/PR 自动化、多人编辑同一草稿、浏览器保存模型密钥、进程级沙箱承诺、内嵌 WebUi。
+不做：NoneBot 插件/渲染器市场发布、多人编辑同一草稿、浏览器保存模型密钥、进程级沙箱承诺、内嵌 WebUi。
 
 ## 二、生成流水线（实际编排）
 
@@ -113,7 +113,8 @@ server/src/
 │   ├── validation.ts   # 校验流水线编排（受限子进程调用 UniBot venv + 校验脚本）
 │   ├── publishing.ts   # 原子发布（staging + rename，摘要核对，拒绝覆盖）
 │   ├── test_tools.ts   # 测试工具后端实现（部署/移除/加载/日志/测试，只写测试环境）
-│   ├── templates.ts    # 统一模板（Extension.Example GitHub 拉取缓存 + 示例代码清理）
+│   ├── templates.ts    # 统一模板（Extension.Example GitHub 拉取缓存 + 示例代码清理 + 仓库级文件）
+│   ├── market.ts       # 插件市场上传（git/gh 命令行：脚手架/提交/建仓/推送/Release/市场 PR）
 │   ├── preview.ts      # 模板预览编排（Jinja2 渲染草稿 Templates → HTML）
 │   ├── mc_server.ts    # 目标 MC 服务器选择/扫描（类型版本插件模组）/上下文渲染
 │   └── unibot_env.ts   # 共享 UniBot 测试环境（GitHub release 下载 + uv venv）+ runProcess
@@ -125,7 +126,7 @@ server/src/
     └── registry.ts     # 功能开关模块注册表（features.json 语义）
 ```
 
-数据目录 `~/.unibot-studio/`：`config/ drafts/ logs/ opencode/(隔离 XDG) opencode-bin/ resources/(单文件版解压) templates/ unibot/(测试环境)`。
+数据目录 `~/.unibot-studio/`：`config/ drafts/ logs/ market/(市场上传工作区) opencode/(隔离 XDG) opencode-bin/ resources/(单文件版解压) templates/ unibot/(测试环境)`。
 
 安全边界不变：路径全部 `resolve()` + workspace 内校验、拒绝符号链接/越界/绝对路径；
 权限默认拒绝，bash 的 `always` 在后端降级为 `once`；白名单文档/MC 服务器目录只读。
@@ -149,6 +150,8 @@ server/src/
 | GET/DELETE | `/drafts/:id` | 详情/删除 |
 | GET/POST | `/drafts/:id/messages` | 历史消息/发送提示词 |
 | POST | `/drafts/:id/abort` · `/revert` · `/check` · `/debug` · `/publish` | 停止/回退/重新校验/AI 修复校验/发布 |
+| POST/GET | `/drafts/:id/market` | 上传插件市场（后台执行）/ 拉取上传运行记录 |
+| GET/PATCH | `/market` | 市场登录态检测与配置（owner/token 脱敏/仓库可见性；token 只能经此接口修改） |
 | GET | `/drafts/:id/files`、`/files/content?path=` | 文件树/内容（受限路径） |
 | GET | `/drafts/:id/diff`、`/todo`、`/permissions` | 技术详情/待办/待处理权限兜底 |
 | GET/POST | `/drafts/:id/preview` | 模板预览名列表/渲染 HTML |
@@ -164,7 +167,30 @@ permission reply、question reply/reject（SDK 未生成的走底层 client post
 `session.status`(含 retry 细节) / `session.idle` / `session.error` / `message.updated` /
 `message.part.updated` / `session.diff` / `todo.updated` / `permission.asked|replied|auto_granted` /
 `question.asked|replied|rejected` / `draft.updated` / `draft.published` / `validation.updated` /
-`unibot-env.updated`。断线重连后前端先 REST 全量恢复再消费实时事件。
+`market.updated` / `unibot-env.updated`。断线重连后前端先 REST 全量恢复再消费实时事件。
+
+### 插件市场上传（studio/market.ts）
+
+校验通过的草稿一键上传到插件市场（`POST /drafts/:id/market` 后台执行，进度经
+`market.updated` 事件推送；运行记录落盘 `DraftMeta.market`）：
+
+```text
+precheck(校验摘要核对) → auth(git 身份 + gh 登录态) → scaffold → commit → repo → push → release → asset → market_pr
+```
+
+- **脚手架**：按 Extension.Example 模板布局生成仓库——扩展源码复制为 `Extension/`，
+  仓库级文件（`.github/workflows/release.yml` 打包工作流、LICENSE、.gitignore）来自模板缓存
+  （templates.ts 的 repo/ 目录），README 按草稿信息生成
+- **GitHub 操作全部走 gh CLI**（repo create/view、release create/view、fork、pr create/list；
+  token 配置时以 `GH_TOKEN` 注入），**本地 git 走 git 命令**（init/add/commit/tag/push；
+  token 模式经 http.extraHeader 鉴权，不把 token 写进 remote URL）
+- **Release 触发打包**：仓库内置 workflow 在 Release 发布后自动把 `Extension/` 打包为
+  `<id>-<version>.zip` 上传资产；asset 步骤轮询等待（超时不阻断，市场定时任务稍后抓取）
+- **市场注册**：fork 市场仓库（config.market.market_repo）→ 写入 `extensions/<id>.json`
+  元数据 → 推送分支 → 创建/复用 Pull Request
+- **登录引导**：未就绪时 `/market` 返回明确 guidance（安装 gh、终端 `gh auth login`、
+  或平台设置粘贴 GitHub PAT）；ready 判定要求 git 身份 + gh CLI 可用 + 登录态 + owner 解析成功。
+  owner 可用环境变量 `UNIBOT_MARKET_OWNER` 覆盖；服务重启时中断的 running 记录落盘为 failed
 
 ## 六、校验、测试工具与提示词
 
@@ -238,10 +264,198 @@ web/src/
 - 大列表延迟渲染；parts 在 `utils/opencode_parts.js` 转稳定视图模型（text/reasoning/tool/
   step/subtask/retry/file 分块渲染）
 
+# WebUi 代码规范
+
+> 技术栈：Vue 3（组合式 API）· Pinia · Vue Router · Reka UI · Iconify · Vite · Bun
+> 风格取向：现代、克制、低圆角、弱渐变。
+
+---
+
+## 1. 项目结构
+
+```
+src/
+├── main.js              # 入口：挂载应用、注册 pinia / router、引入全局样式
+├── App.vue              # 根组件：只放布局骨架与 <RouterView>
+├── router/index.js      # 路由配置（统一在此维护）
+├── stores/              # Pinia store，一个文件一个 store
+├── components/
+│   └── ui/              # 基于 reka-ui 的二次封装（Button.vue、Dialog.vue…）
+├── views/               # 页面级组件，与路由一一对应
+├── composables/         # 可复用逻辑，use_ 前缀（use_xxx.js）
+├── styles/
+│   └── main.css         # 全局 reset、设计变量、通用工具类
+└── utils/               # 纯函数工具
+```
+
+约定：
+
+- 组件、composable、store 文件：组件 `PascalCase`，composable / store 用 `snake_case`（`ServerCard.vue`、`use_bot_status.js`、`server.js`）。
+- 目录内文件职责单一；单文件超过 ~300 行即考虑拆分。
+- 路径引用使用 `@/` 别名，禁止 `../../` 深层相对路径。
+
+## 2. Vue 编码规范
+
+- **只使用组合式 API**：`<script setup>`，禁止 Options API。
+- SFC 内块顺序固定：`<script setup>` → `<template>` → `<style scoped>`。
+- 显式声明并校验 props / emits：
+
+```vue
+<script setup>
+defineProps({
+  title: { type: String, required: true },
+  loading: { type: Boolean, default: false },
+})
+defineEmits(['confirm'])
+</script>
+```
+
+- 响应式：对象/数组用 `reactive`，单值用 `ref`；解构 reactive 必须 `toRefs`。
+- 副作用一律在 `watchEffect` / `watch` 中处理，并在 `onUnmounted` 清理定时器、监听器。
+- 可复用逻辑抽成 `composables/use_xxx.js`，返回响应式数据与方法。
+- 模板中不写复杂表达式，超过一行的逻辑移入计算属性或方法。
+- 列表渲染必须绑定稳定 `key`（用 id，禁止用 index）。
+
+## 3. Pinia
+
+- 只使用 Setup Store 写法：
+
+```js
+// stores/server.js
+import { ref, computed } from 'vue'
+import { defineStore } from 'pinia'
+
+export const useServerStore = defineStore('server', () => {
+  const list = ref([])
+  const online = computed(() => list.value.filter((s) => s.is_online))
+
+  async function fetch_list() {
+    /* ... */
+  }
+
+  return { list, online, fetch_list }
+})
+```
+
+- store 函数名沿用 Pinia 官方约定 `useXxxStore`（驼峰），属约定俗成例外；store 内部的 state / action / getter 仍遵循全局 snake_case。
+
+- 状态只在 store 内修改，组件通过 action 触发变更。
+- 组件中用 `storeToRefs()` 解构 state / getter，action 直接解构。
+
+## 4. Router
+
+- 路由集中定义于 `router/index.js`，`name` 与视图文件同名。
+- 页面级视图使用懒加载：`component: () => import('@/views/HomeView.vue')`。
+- 路由守卫只做权限、全局 loading 等横切逻辑。
+
+## 5. UI 框架：Reka UI
+
+- reka-ui 是无样式组件，**禁止在业务代码中直接使用原始 reka-ui 组件**。
+- 所有用到的 reka-ui 组件先在 `components/ui/` 中二次封装，再供页面使用：
+
+```vue
+<!-- components/ui/Dialog.vue -->
+<script setup>
+import { DialogRoot, DialogTrigger, DialogPortal, DialogOverlay, DialogContent, DialogTitle } from 'reka-ui'
+</script>
+```
+
+- 组件的全部样式（包括 reka-ui 相关）直接写在组件自身的 `<style scoped>` 中，不再维护独立的全局 ui.css。
+- 充分利用 reka-ui 暴露的 data 状态属性写样式，不额外维护 class：
+  `[data-state="open"]`、`[data-state="checked"]`、`[data-highlighted]`、`[data-disabled]`。
+- 弹层类组件保留 `DialogPortal` / `PopoverPortal` 默认 portal 行为，不手动挪 DOM。
+- 在 `App.vue` 根部包裹 `<ConfigProvider>` 统一全局配置。
+
+## 6. 图标：Iconify
+
+- 统一使用 `@iconify/vue` 的 `<Icon>` 组件，禁止混用其他图标方案：
+
+```vue
+<script setup>
+import { Icon } from '@iconify/vue'
+</script>
+
+<template>
+  <Icon icon="lucide:settings" width="16" />
+</template>
+```
+
+- 图标集统一使用 `lucide`（需要其他集合时在本规范中登记）。
+- 尺寸走 `width` / `height`（默认 16 / 20 / 24 三档），颜色继承 `currentColor`。
+
+## 7. 样式规范
+
+### 设计基调
+
+现代、扁平、克制：
+
+- **圆角**：默认 `--radius: 6px`；按钮/输入框 6px，卡片 8px，弹层 10px。禁止全面 16px+ 大圆角，胶囊形仅用于标签、开关等语义场景。
+- **渐变**：少用。禁止强对比、高饱和渐变；确需使用时，同色系明度微调（差值 ≤ 10%），且只用于背景，不用于文字。
+- 优先用边框（1px）、层级背景色、投影区分层次，而非色彩堆叠。
+- 动效：过渡 `150–200ms`，缓动 `ease-out`；只做状态反馈（hover / open / active），不做装饰性动画。
+
+### 设计变量（`styles/main.css`）
+
+颜色、圆角、间距、字号、阴影一律走 CSS 变量，禁止在组件中写魔法值：
+
+```css
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --text-muted: #71717a;
+  --accent: #2563eb;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+```
+
+### 书写规则
+
+- 组件样式必须 `scoped`；全局样式只允许出现在 `styles/` 目录。
+- 选择器最多 3 层嵌套；不使用 `!important`（覆盖第三方样式除外，需注释说明）。
+- 布局用 Flex / Grid；间距只用 `--space-*` 变量。
+- 类名语义化小写中划线（`server-card`、`status-dot`），不加 `__元素名` 后缀；样式作用域由 `scoped` 保证，无需 BEM 长命名。
+
+## 8. 命名与通用
+
+- 变量/函数 `snake_case`（`server_list`、`fetch_status`），常量 `UPPER_SNAKE`，组件 `PascalCase`。
+- **少用缩写**：命名用完整、语义明确的单词，禁止自造缩写（`server_list` ✗ `srv_lst`、`message` ✗ `msg`、`button` ✗ `btn`）；仅允许业界公认缩写（`id`、`url`、`api`、`http`、`ws`）。
+- 事件命名 `kebab-case`（`@status-change`）。
+- 包管理与脚本统一使用 Bun；提交前执行 `bun run format`（oxfmt）。
+- 新增依赖、新增全局样式、新增图标集，需同步更新本文件。
+
+## 9. 参考文档
+
+### Reka UI（https://reka-ui.com/llms.txt）
+
+无样式、完全可访问的 Vue UI 组件库官方文档索引。涉及本项目的 reka-ui 封装时，先获取该文档确认组件 API 与用法。
+
+- **Guides**：`/docs/guides/styling.md`（无样式 + 任意样式方案）、`/docs/guides/animation.md`（CSS keyframes / Vue Transition 动画）、`/docs/guides/composition.md`（`asChild` 组合）、`/docs/guides/controlled-state.md`（受控/非受控状态）、`/docs/guides/server-side-rendering.md`、`/docs/guides/namespaced-components.md`、`/docs/guides/dates.md`、`/docs/guides/i18n.md`（RTL）、`/docs/guides/inject-context.md`（`injectContext`）、`/docs/guides/virtualization.md`（`@tanstack/virtual`）、`/docs/guides/migration.md`（Radix Vue → Reka UI）。
+- **Components**：
+  - Form：`autocomplete`、`checkbox`、`combobox`、`editable`、`listbox`、`number-field`、`label`、`pin-input`、`radio-group`、`rating`、`select`、`slider`、`switch`、`tags-input`、`toggle`、`toggle-group`
+  - Color：`color-area`、`color-field`、`color-slider`、`color-swatch`、`color-swatch-picker`
+  - Dates：`calendar`、`date-field`、`date-picker`、`date-range-field`、`date-range-picker`、`range-calendar`、`time-field`、`time-range-field`、`month-picker`、`month-range-picker`、`year-picker`、`year-range-picker`
+  - General：`accordion`、`alert-dialog`、`aspect-ratio`、`avatar`、`collapsible`、`context-menu`、`dialog`、`drawer`、`dropdown-menu`、`hover-card`、`menubar`、`navigation-menu`、`pagination`、`popover`、`progress`、`scroll-area`、`separator`、`splitter`、`stepper`、`tabs`、`toast`、`toolbar`、`tooltip`、`tree`
+  - 路径格式：`/docs/components/<name>.md`
+- **Utilities**：
+  - Component：`config-provider`、`focus-scope`、`presence`、`primitive`、`roving-focus`、`slot`、`visually-hidden`
+  - Composable：`use-id`、`use-date-formatter`、`use-direction`、`use-locale`、`use-emit-as-props`、`use-filter`、`use-forward-expose`、`use-forward-props`、`use-forward-props-emits`
+  - 路径格式：`/docs/utilities/<name>.md`
+
+
 ## 九、已知限制与后续方向
 
 - 渲染包/模板扩展的可视化预览已有（iframe srcdoc + Jinja2 渲染），专属可视化编辑仍属后续
 - 免费网关模型上游不稳定：平台已做重试可见性与超时兜底，彻底解决需换更稳的 provider
 - MC 真机测试环境（模式 A/B、mineflayer 机器人）为备用方案未实施；当前仅有目标服务器
   目录扫描 + 上下文注入（mc_server.ts）与 `features.mc_test_environment` 开关位
-- 远程部署发布（UniBot REST API 交付）、Linux rootless 容器隔离、市场发布均未实施
+- 远程部署发布（UniBot REST API 交付）、Linux rootless 容器隔离均未实施；
+  市场上传依赖本机 gh CLI（token-only 无 gh 模式需补 GitHub REST 集成）
