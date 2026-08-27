@@ -215,7 +215,8 @@ unibot_undeploy / unibot_load / unibot_logs / unibot_run_tests / unibot_validate
   `summary.md`、`messages/status.md`（面向用户的阶段文案）、`docs/`（本地文档白名单副本，`bun run sync:docs` 同步）
 - 安全约束由后端 `buildSecurity()` 追加（workspace 白名单、文档/市场白名单、MC 服务器只读、
   测试环境命令、联网规则），不进可编辑模板
-- `server/skills/`：`api.md`、`command.md`，按草稿 types 自动拼入 system
+- `server/skills/`：`api.md`、`command.md`、`template.md`、`resources.md`，按草稿 types 自动拼入 system
+  （混合扩展同时加载代码型与无代码型技能；template 技能含混合扩展的渲染调用指导）
 - 版本化存储于 `<data_dir>/config/prompts/`，可激活/回滚
 
 ## 七、开发与打包

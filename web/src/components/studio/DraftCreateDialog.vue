@@ -1,6 +1,7 @@
 <script setup>
 // 新建扩展草稿对话框（Plan 3.1：ID / 名称 / 描述 / 扩展类型 / 模板 / 模型 / Agent）
 // 扩展类型为主选择：渲染包（模板）/ 资源 / 代码；选代码后再细分指令或 API，模板由类型自动决定。
+// 支持混合扩展：任意主形态都可附加无代码部分（模板/资源），与代码能力组合在同一个扩展中。
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
@@ -29,6 +30,7 @@ const form = ref({
   description: '',
   extension_kind: 'code', // code | template | resources
   code_types: ['command'], // 仅代码型：细分 command / api
+  extra_types: [], // 附加无代码部分（template / resources），与主类型组合成混合扩展
   provider_id: '',
   model_id: '',
   agent: 'build',
@@ -56,17 +58,46 @@ const codeTypeOptions = [
   { value: 'api', label: TYPE_LABELS.api },
 ]
 
-/** 依据主类型推导提交的 types */
+/** 主形态为无代码时占用的类型（附加选项需排除，避免重复声明） */
+const KIND_BASE_TYPE = {
+  template: 'template',
+  resources: 'resources',
+}
+
+/** 可附加的无代码部分（模板/资源）：与主类型组合成混合扩展 */
+const extraTypeOptions = computed(() => {
+  const occupied = KIND_BASE_TYPE[form.value.extension_kind]
+  return [
+    { value: 'template', label: '模板部分' },
+    { value: 'resources', label: '资源部分' },
+  ].filter((option) => option.value !== occupied)
+})
+
+/** 依据主类型推导提交的 types（含附加的无代码部分） */
 const payload_types = computed(() => {
   switch (form.value.extension_kind) {
     case 'template':
-      return ['template']
+      return ['template', ...form.value.extra_types]
     case 'resources':
-      return ['resources']
+      return ['resources', ...form.value.extra_types]
     default:
-      return form.value.code_types.length ? form.value.code_types : ['command']
+      return [
+        ...(form.value.code_types.length ? form.value.code_types : ['command']),
+        ...form.value.extra_types,
+      ]
   }
 })
+
+// 切换主形态时移除与新主形态冲突的附加项（如从代码切到渲染包，去掉已选的模板部分）
+watch(
+  () => form.value.extension_kind,
+  (kind) => {
+    const occupied = KIND_BASE_TYPE[kind]
+    if (occupied) {
+      form.value.extra_types = form.value.extra_types.filter((t) => t !== occupied)
+    }
+  },
+)
 
 /** 统一模板是否已就绪（未就绪时阻止创建并引导拉取） */
 const unified_ready = computed(() => {
@@ -83,6 +114,18 @@ const kindHint = computed(() => {
       return '从统一模板起步（标准扩展布局），AI 帮你整理 Resources/ 图片、字体与样式片段'
     default:
       return `统一模板（标准扩展布局）+ 干净脚手架：从空白的 ${form.value.code_types.map((t) => TYPE_LABELS[t]).join(' / ') || '代码'} 开始，AI 直接实现`
+  }
+})
+
+/** 附加无代码部分的提示文案（随主形态变化） */
+const extra_hint = computed(() => {
+  switch (form.value.extension_kind) {
+    case 'template':
+      return '附带资源目录：模板可直接引用自带图片、字体，无需另建资源扩展'
+    case 'resources':
+      return '附带 Templates/ 目录：同一扩展一并注册为模板包'
+    default:
+      return '勾选后创建混合扩展：指令/API 负责逻辑，模板与资源提供渲染版式与素材'
   }
 })
 
@@ -209,6 +252,12 @@ function toggleCodeType(type) {
     ? form.value.code_types.filter((x) => x !== type)
     : [...form.value.code_types, type]
 }
+
+function toggleExtraType(type) {
+  form.value.extra_types = form.value.extra_types.includes(type)
+    ? form.value.extra_types.filter((x) => x !== type)
+    : [...form.value.extra_types, type]
+}
 </script>
 
 <template>
@@ -273,6 +322,26 @@ function toggleCodeType(type) {
           </button>
         </div>
         <span class="form-hint">指令扩展发送 /xxx 指令，API 扩展提供可复用的服务能力</span>
+      </div>
+      <div class="field">
+        <label class="form-label">附加无代码部分（可选）</label>
+        <div class="type-group">
+          <button
+            v-for="type in extraTypeOptions"
+            :key="type.value"
+            type="button"
+            class="type-chip"
+            :class="{ active: form.extra_types.includes(type.value) }"
+            @click="toggleExtraType(type.value)"
+          >
+            <Icon
+              :icon="form.extra_types.includes(type.value) ? 'lucide:check' : 'lucide:plus'"
+              width="13"
+            />
+            {{ type.label }}
+          </button>
+        </div>
+        <span class="form-hint">{{ extra_hint }}</span>
       </div>
       <div class="field">
         <label class="form-label">目标 MC 服务器（可选）</label>

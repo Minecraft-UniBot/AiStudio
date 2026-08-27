@@ -207,6 +207,29 @@ describe('scaffoldDraftWorkspace (统一模板)', () => {
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  test('混合扩展（command + resources）：入口与资源目录并存，清单同时声明两段', () => {
+    seedUnifiedTemplate();
+    const ws = tmpdirAt('workspace-hybrid');
+    try {
+      scaffoldDraftWorkspace(ws, {
+        extensionId: 'Hybrid',
+        name: '混合指令',
+        description: '指令+资源',
+        types: ['command', 'resources'],
+      });
+      // 混合扩展含代码能力：保留入口与占位测试
+      expect(existsSync(join(ws, '__init__.py'))).toBe(true);
+      expect(existsSync(join(ws, 'tests', 'test_extension.py'))).toBe(true);
+      // 无代码部分：素材目录就位
+      expect(existsSync(join(ws, 'Resources'))).toBe(true);
+      const toml = readFileSync(join(ws, 'Extension.toml'), 'utf-8');
+      expect(toml).toMatch(/types\s*=\s*\[\s*"command",\s*"resources"\s*\]/);
+      expect(toml).toMatch(/\[resources\]/);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('hasCodeType', () => {

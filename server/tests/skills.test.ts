@@ -11,10 +11,12 @@ import { listSkills, loadSkillsForTypes, renderSkillsSection } from '../src/ai/s
 import type { ExtensionType } from '../src/core/types';
 
 describe('skills 加载', () => {
-  test('存在 command / api 两个 skill 文件', () => {
+  test('存在 command / api / template / resources 四个 skill 文件', () => {
     const names = listSkills();
     expect(names).toContain('command');
     expect(names).toContain('api');
+    expect(names).toContain('template');
+    expect(names).toContain('resources');
   });
 
   test('按类型匹配：command 只加载 command', () => {
@@ -32,6 +34,15 @@ describe('skills 加载', () => {
   test('多类型加载多个 skill', () => {
     const loaded = loadSkillsForTypes(['api', 'command']);
     expect(loaded.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('混合扩展：command + template 加载两个技能且含混合指导', () => {
+    const loaded = loadSkillsForTypes(['command', 'template']);
+    expect(loaded.some((s) => s.includes('register_command'))).toBe(true);
+    expect(loaded.some((s) => s.includes('render_image'))).toBe(true);
+    // template skill 覆盖混合扩展场景
+    const template_skill = loaded.find((s) => s.includes('模板扩展开发'));
+    expect(template_skill).toContain('混合扩展');
   });
 
   test('renderSkillsSection 输出包含标题', () => {

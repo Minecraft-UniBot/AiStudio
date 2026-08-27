@@ -10,12 +10,13 @@ import { join } from 'node:path';
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..');
 const DOCS_DEST = join(import.meta.dir, '..', 'prompts', 'docs');
 
+/** 源文件已改英文名（2026-08 文档站重组），目标中文名保持稳定（config.ts 白名单与提示词引用） */
 const SOURCES: Array<[string, string]> = [
-  ['UniBot/Docs/docs/unibot/开发插件.md', '开发插件.md'],
-  ['UniBot/Docs/docs/unibot/扩展系统.md', '扩展系统.md'],
-  ['UniBot/Docs/docs/unibot/配置说明.md', '配置说明.md'],
-  ['UniBot/Docs/docs/unibot/上传市场.md', '上传市场.md'],
-  ['UniBot/Docs/docs/unibot/接口文档.md', '接口文档.md'],
+  ['UniBot/Docs/docs/unibot/developing-extensions.md', '开发插件.md'],
+  ['UniBot/Docs/docs/unibot/extension-system.md', '扩展系统.md'],
+  ['UniBot/Docs/docs/guide/configuration.md', '配置说明.md'],
+  ['UniBot/Docs/docs/unibot/marketplace.md', '上传市场.md'],
+  ['UniBot/Docs/docs/unibot/api-reference.md', '接口文档.md'],
   ['UniBot/AGENT.md', '编码规范.md'],
 ];
 
