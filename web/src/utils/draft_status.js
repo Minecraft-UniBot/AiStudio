@@ -24,3 +24,22 @@ export const TYPE_LABELS = {
   template: '模板',
   resources: '资源',
 }
+
+/**
+ * 状态 → Badge 变体映射（DRY：DraftList / DevelopmentToolbar / ResultSummary 共用）
+ * 返回 neutral | accent | success | danger
+ */
+export function status_variant(status) {
+  switch (status) {
+    case 'planning':
+    case 'coding':
+      return 'accent'
+    case 'ready':
+    case 'published':
+      return 'success'
+    case 'error':
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}

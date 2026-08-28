@@ -573,6 +573,7 @@ function onKeydown(e) {
 
 .input-area.busy .input-wrap {
   background: var(--surface-sunken);
+  border-color: var(--border);
 }
 
 .chat-input {
@@ -622,5 +623,6 @@ function onKeydown(e) {
   width: 38px;
   height: 38px;
   flex-shrink: 0;
+  border-radius: var(--radius-md);
 }
 </style>

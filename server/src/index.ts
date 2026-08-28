@@ -14,6 +14,7 @@ import { enableFileLogging, logger } from './core/logger';
 import { trackSession, untrackDraft } from './studio/sessions';
 import {
   assertPromptable,
+  cloneDraft,
   computeRevision,
   createDraft,
   deleteDraft,
@@ -492,6 +493,42 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
+  // ---- 克隆草稿（基于已有草稿创建副本，复制工作区文件，重置运行状态） ----
+  const cloneMatch = path.match(/^\/api\/studio\/drafts\/([^/]+)\/clone$/);
+  if (cloneMatch && req.method === 'POST') {
+    const sourceId = cloneMatch[1]!;
+    try {
+      readDraft(sourceId); // 验证源草稿存在
+      const body = (await req.json().catch(() => ({}))) as {
+        extension_id?: string;
+        name?: string;
+        description?: string;
+        types?: string[];
+        model?: { provider_id?: string; model_id?: string } | null;
+      };
+      const types = body.types ? sanitizeTypes(body.types) : undefined;
+      const model = body.model?.provider_id && body.model?.model_id
+        ? { provider_id: body.model.provider_id, model_id: body.model.model_id }
+        : body.model === null ? null : undefined;
+      const cloned = cloneDraft(sourceId, {
+        extension_id: body.extension_id,
+        name: body.name,
+        description: body.description,
+        types,
+        model,
+      });
+      logger.info('draft', '克隆草稿', {
+        source_id: sourceId,
+        new_id: cloned.id,
+        extension_id: cloned.extension_id,
+      });
+      return json({ draft: cloned });
+    } catch (e) {
+      if (e instanceof DraftError) return errorJson(e.message, 1, 400);
+      return errorJson(`克隆草稿失败：${(e as Error).message}`, 1, 500);
+    }
+  }
+
   // ---- 单个草稿 ----
   const draftMatch = path.match(/^\/api\/studio\/drafts\/([^/]+)$/);
   if (draftMatch) {
@@ -827,7 +864,8 @@ async function handleRequest(req: Request): Promise<Response> {
         case 'publish': {
           if (req.method === 'POST') {
             try {
-              const record = publishDraft(draftId);
+              const body = (await req.json().catch(() => ({}))) as { update?: boolean };
+              const record = publishDraft(draftId, body.update === true);
               broadcast({ type: 'draft.published', draft_id: draftId });
               return json(record);
             } catch (e) {

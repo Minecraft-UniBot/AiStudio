@@ -22,6 +22,7 @@ defineProps({
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 .ui-badge--neutral {
@@ -32,20 +33,24 @@ defineProps({
 .ui-badge--success {
   background: var(--success-soft);
   color: var(--success);
+  border: 1px solid rgb(22 163 74 / 0.12);
 }
 
 .ui-badge--warning {
   background: var(--warning-soft);
   color: var(--warning);
+  border: 1px solid rgb(217 119 6 / 0.12);
 }
 
 .ui-badge--danger {
   background: var(--danger-soft);
   color: var(--danger);
+  border: 1px solid rgb(220 38 38 / 0.12);
 }
 
 .ui-badge--accent {
   background: var(--accent-soft);
   color: var(--accent);
+  border: 1px solid rgb(37 99 235 / 0.12);
 }
 </style>

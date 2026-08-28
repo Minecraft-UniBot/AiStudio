@@ -1,7 +1,7 @@
 <script setup>
 // 顶部工具栏：返回、草稿信息、连接状态、主操作按钮（Plan 3.2）
 import { Icon } from '@iconify/vue'
-import { STATUS_LABELS } from '@/utils/draft_status'
+import { STATUS_LABELS, status_variant } from '@/utils/draft_status'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 
@@ -13,21 +13,6 @@ defineProps({
 })
 
 defineEmits(['back'])
-
-function statusVariant(status) {
-  switch (status) {
-    case 'planning':
-    case 'coding':
-      return 'accent'
-    case 'ready':
-    case 'published':
-      return 'success'
-    case 'error':
-      return 'danger'
-    default:
-      return 'neutral'
-  }
-}
 </script>
 
 <template>
@@ -38,7 +23,7 @@ function statusVariant(status) {
     <div class="draft-title">
       <span class="name">{{ draft.name }}</span>
       <span class="id mono">{{ draft.extension_id }}</span>
-      <Badge :variant="statusVariant(draft.status)">{{ STATUS_LABELS[draft.status] }}</Badge>
+      <Badge :variant="status_variant(draft.status)">{{ STATUS_LABELS[draft.status] }}</Badge>
     </div>
     <div class="toolbar-right">
       <Badge :variant="connected ? 'success' : 'warning'">
@@ -69,6 +54,7 @@ function statusVariant(status) {
   gap: var(--space-3);
   flex-shrink: 0;
   background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.04);
 }
 
 .draft-title {

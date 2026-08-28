@@ -1,7 +1,8 @@
 <script setup>
 // 草稿列表（Plan 3.1：默认展示草稿列表）
 import { Icon } from '@iconify/vue'
-import { STATUS_LABELS, TYPE_LABELS } from '@/utils/draft_status'
+import { STATUS_LABELS, TYPE_LABELS, status_variant } from '@/utils/draft_status'
+import { format_relative_time } from '@/utils/format'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -14,22 +15,7 @@ defineProps({
   ocError: { type: String, default: '' },
 })
 
-const emit = defineEmits(['open', 'remove', 'create', 'refresh-status'])
-
-function statusVariant(status) {
-  switch (status) {
-    case 'planning':
-    case 'coding':
-      return 'accent'
-    case 'ready':
-    case 'published':
-      return 'success'
-    case 'error':
-      return 'danger'
-    default:
-      return 'neutral'
-  }
-}
+const emit = defineEmits(['open', 'remove', 'clone', 'create', 'refresh-status'])
 </script>
 
 <template>
@@ -50,10 +36,14 @@ function statusVariant(status) {
       description="点击「新建扩展」开始你的第一个扩展"
     />
     <div v-else class="draft-grid">
-      <div v-for="draft in drafts" :key="draft.id" class="draft-card">
+      <div
+        v-for="draft in drafts"
+        :key="draft.id"
+        class="draft-card"
+      >
         <div class="draft-card-head">
           <span class="draft-name">{{ draft.name }}</span>
-          <Badge :variant="statusVariant(draft.status)">{{ STATUS_LABELS[draft.status] }}</Badge>
+          <Badge :variant="status_variant(draft.status)">{{ STATUS_LABELS[draft.status] }}</Badge>
         </div>
         <div class="draft-id mono">{{ draft.extension_id }}</div>
         <p class="draft-desc">{{ draft.description }}</p>
@@ -62,10 +52,19 @@ function statusVariant(status) {
           <Badge v-if="draft.model" variant="neutral">{{ draft.model.model_id }}</Badge>
         </div>
         <div class="draft-card-foot">
-          <span class="time">{{ new Date(draft.updated_at).toLocaleString() }}</span>
+          <span class="time">{{ format_relative_time(draft.updated_at) }}</span>
           <div class="actions">
             <Button size="sm" variant="primary" @click="emit('open', draft)">
               {{ draft.status === 'published' ? '查看' : '继续开发' }}
+            </Button>
+            <Button
+              variant="ghost"
+              icon-only
+              size="sm"
+              title="克隆草稿"
+              @click="emit('clone', draft)"
+            >
+              <Icon icon="lucide:copy" width="14" />
             </Button>
             <Button
               v-if="draft.status !== 'published'"
@@ -137,7 +136,7 @@ function statusVariant(status) {
 .draft-card:hover {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .draft-card-head {

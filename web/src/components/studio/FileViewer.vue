@@ -219,12 +219,6 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   color: var(--accent);
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Transition */
 .file-viewer-enter-active,
 .file-viewer-leave-active {

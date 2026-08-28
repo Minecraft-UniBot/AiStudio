@@ -78,19 +78,22 @@ async function login() {
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
+  /* 双层渐变：对角蓝色 + 柔和暖调，营造专业而温暖的第一印象 */
   background:
-    radial-gradient(circle at 30% 20%, var(--accent-soft), transparent 55%),
+    radial-gradient(circle at 75% 80%, rgb(239 244 255 / 0.6), transparent 50%),
+    radial-gradient(circle at 25% 15%, var(--accent-soft), transparent 50%),
     var(--bg);
 }
 
 .login-card {
   width: 380px;
   max-width: 100%;
-  padding: 32px;
+  padding: 36px 32px 28px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
+  animation: login-card-enter 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .brand {
@@ -102,12 +105,13 @@ async function login() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
   margin-bottom: var(--space-3);
   border-radius: var(--radius-md);
   background: var(--accent-soft);
   color: var(--accent);
+  box-shadow: 0 0 0 4px rgb(37 99 235 / 0.08);
 }
 
 .brand h1 {
@@ -172,5 +176,12 @@ async function login() {
 .hint svg {
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+@keyframes login-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
 }
 </style>

@@ -1,5 +1,6 @@
 <script setup>
 // 发布确认对话框（Plan 3.4：只列出功能摘要、使用方式、配置项和重启提示）
+// 支持覆盖发布模式：目标 ID 已存在时提示用户确认更新
 import { Icon } from '@iconify/vue'
 import Dialog from '@/components/ui/Dialog.vue'
 
@@ -8,6 +9,8 @@ const open = defineModel({ type: Boolean, default: false })
 defineProps({
   draft: { type: Object, required: true },
   publishing: { type: Boolean, default: false },
+  /** 是否为覆盖发布（目标目录已存在同 ID 扩展） */
+  isUpdate: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['confirm'])
@@ -16,13 +19,17 @@ const emit = defineEmits(['confirm'])
 <template>
   <Dialog
     v-model="open"
-    title="确认发布"
-    description="发布采用原子交付；目标 ID 已存在时拒绝覆盖"
-    confirm-text="一键发布到 UniBot"
+    :title="isUpdate ? '确认更新发布' : '确认发布'"
+    :description="isUpdate ? '目标扩展已存在，将覆盖当前版本（旧版本备份到 .backup/）' : '发布采用原子交付；目标 ID 已存在时将提示更新'"
+    :confirm-text="isUpdate ? '覆盖发布到 UniBot' : '一键发布到 UniBot'"
     :loading="publishing"
     @confirm="$emit('confirm')"
   >
     <div class="publish-summary">
+      <div v-if="isUpdate" class="update-banner">
+        <Icon icon="lucide:refresh-cw" width="14" />
+        <span>覆盖发布：旧版本会自动备份，如需回滚可从 <code>.backup/</code> 目录恢复</span>
+      </div>
       <div class="summary-row">
         <span class="label">扩展</span>
         <span class="value mono">{{ draft.name }}（{{ draft.extension_id }}）</span>
@@ -67,6 +74,30 @@ const emit = defineEmits(['confirm'])
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  color: #1e40af;
+  line-height: 1.5;
+}
+
+.update-banner code {
+  background: #dbeafe;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: var(--text-xs);
+}
+
+.update-banner svg {
+  flex-shrink: 0;
 }
 
 .summary-row {

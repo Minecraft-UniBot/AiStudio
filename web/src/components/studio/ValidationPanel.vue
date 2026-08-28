@@ -206,14 +206,4 @@ const canRecheck = computed(
   line-height: 1.5;
   color: var(--text-secondary);
 }
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 </style>

@@ -52,6 +52,15 @@ async function removeDraft(draft) {
   }
 }
 
+async function cloneDraft(draft) {
+  try {
+    const newDraft = await store.cloneDraft(draft.id)
+    toast_success(`草稿「${draft.name}」已克隆为「${newDraft.name}」`)
+  } catch (e) {
+    toast_error(e.message)
+  }
+}
+
 // UniBot 目录保存成功后：刷新状态（让顶部状态徽章 / 发布逻辑读到新目录）
 function onUnibotDirSaved() {
   store.fetchStatus()
@@ -130,6 +139,7 @@ function onUnibotDirSaved() {
         :oc-error="store.status?.error ?? ''"
         @open="openDraft"
         @remove="removeDraft"
+        @clone="cloneDraft"
       />
     </main>
 

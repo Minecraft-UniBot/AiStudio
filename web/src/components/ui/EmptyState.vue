@@ -23,15 +23,23 @@ defineProps({
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-8) var(--space-4);
   color: var(--text-muted);
   text-align: center;
 }
 
 .empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
   color: var(--border-strong);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .empty-title {
@@ -43,5 +51,6 @@ defineProps({
 .empty-desc {
   font-size: var(--text-sm);
   max-width: 360px;
+  line-height: 1.6;
 }
 </style>

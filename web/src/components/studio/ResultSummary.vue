@@ -2,7 +2,7 @@
 // 功能结果摘要（Plan 3.4 右栏「功能」Tab）：扩展信息 + 机械校验状态 + 发布入口
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
-import { TYPE_LABELS, STATUS_LABELS } from '@/utils/draft_status'
+import { TYPE_LABELS, STATUS_LABELS, status_variant } from '@/utils/draft_status'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 
@@ -18,19 +18,7 @@ const types = computed(() => props.draft.types.map((type) => TYPE_LABELS[type]).
 const statusLabel = computed(() => STATUS_LABELS[props.draft.status] ?? props.draft.status)
 
 /** 草稿当前所处阶段对应的徽章变体 */
-const statusVariant = computed(() => {
-  switch (props.draft.status) {
-    case 'published':
-      return 'success'
-    case 'ready':
-      return 'success'
-    case 'planning':
-    case 'coding':
-      return 'accent'
-    default:
-      return 'neutral'
-  }
-})
+const draft_status_variant = computed(() => status_variant(props.draft.status))
 
 /** 校验状态文案与图标 */
 const validation = computed(() => {
@@ -76,7 +64,7 @@ const inProgressText = computed(() =>
           <h3 class="ext-name">{{ draft.name }}</h3>
           <div class="ext-meta">
             <span class="mono ext-id">{{ draft.extension_id }}</span>
-            <Badge :variant="statusVariant" class="ext-status">{{ statusLabel }}</Badge>
+            <Badge :variant="draft_status_variant" class="ext-status">{{ statusLabel }}</Badge>
           </div>
         </div>
       </div>
@@ -409,16 +397,5 @@ const inProgressText = computed(() =>
 
 .market-status svg.spin {
   color: var(--accent);
-}
-
-/* ---------- 动画 ---------- */
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

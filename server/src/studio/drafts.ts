@@ -9,6 +9,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  cpSync,
   existsSync,
   lstatSync,
   readFileSync,
@@ -20,7 +21,7 @@ import {
   writeFileSync,
   mkdirSync,
 } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { config } from '../core/config';
 import { assertDiskSpace } from '../core/disk';
@@ -336,6 +337,113 @@ export function createDraft(input: {
     model: input.model,
     model_switched: false,
     agent: input.agent,
+    validation: null,
+    validation_revision: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    published_at: null,
+  };
+  writeDraft(meta);
+  return meta;
+}
+
+/**
+ * 克隆草稿：基于已有草稿创建新草稿，复制工作区全部文件，重置运行状态。
+ *
+ * 用途：
+ * - 已发布草稿想迭代新版本（published 状态只读，无法继续编辑）
+ * - 基于现有扩展的代码/布局快速创建类似扩展
+ * - 保留当前版本的同时尝试不同方向
+ *
+ * 行为：
+ * - 复制工作区全部文件（跳过 __pycache__ 等缓存）
+ * - extension_id 可改（必须通过校验）；名称/描述可选更新
+ * - 状态重置为 draft，session_id/validation/plan_summary 等全部清空
+ * - 模型选择保留（用户可能想用同一模型继续）
+ * - MC 服务器快照保留
+ * - 初始化 git 仓库（OpenCode 快照/回退依赖）
+ */
+export function cloneDraft(
+  sourceId: string,
+  input: {
+    extension_id?: string;
+    name?: string;
+    description?: string;
+    types?: ExtensionType[];
+    model?: DraftMeta['model'] | null;
+  },
+): DraftMeta {
+  const source = readDraft(sourceId);
+  const existing = listDrafts();
+
+  const extensionId = input.extension_id ?? source.extension_id;
+  // 如果 extension_id 未变，跳过冲突检查（同 ID 克隆是允许的，新草稿有独立 UUID）
+  if (extensionId !== source.extension_id) {
+    validateExtensionId(extensionId, existing);
+  }
+
+  assertDiskSpace(config.data_dir, '克隆草稿');
+
+  const newId = randomUUID();
+  const newWorkspace = join(draftWorkspace(newId), extensionId);
+  mkdirSync(newWorkspace, { recursive: true });
+
+  // 复制工作区文件（跳过缓存目录，与发布过滤逻辑一致）
+  const sourceWorkspace = draftWorkspace(sourceId);
+  if (existsSync(sourceWorkspace)) {
+    cpSync(sourceWorkspace, newWorkspace, {
+      recursive: true,
+      dereference: false,
+      errorOnExist: false,
+      filter: (src) => {
+        const name = basename(src);
+        return name !== '__pycache__' && !name.startsWith('.');
+      },
+    });
+  }
+
+  // 如果 extension_id 改了，需要重写 Extension.toml 中的 id 并重命名扩展目录
+  if (extensionId !== source.extension_id) {
+    const oldExtDir = join(newWorkspace, source.extension_id);
+    const newExtDir = join(newWorkspace, extensionId);
+    // 先移动目录（如果旧目录存在且新目录不存在）
+    if (existsSync(oldExtDir) && !existsSync(newExtDir)) {
+      renameSync(oldExtDir, newExtDir);
+    }
+    const tomlFile = join(newExtDir, 'Extension.toml');
+    if (existsSync(tomlFile)) {
+      try {
+        const doc = parseToml(readFileSync(tomlFile, 'utf-8')) as Record<string, unknown>;
+        if (doc.extension) {
+          (doc.extension as Record<string, unknown>).id = extensionId;
+        }
+        writeFileSync(tomlFile, stringifyToml(doc), 'utf-8');
+      } catch {
+        // TOML 操作失败不阻塞克隆
+      }
+    }
+  }
+
+  // 初始化 git 仓库
+  ensureGitWorkspace(newId);
+
+  const types = input.types ?? source.types;
+  const meta: DraftMeta = {
+    schema_version: 1,
+    id: newId,
+    extension_id: extensionId,
+    name: input.name ?? `${source.name}（副本）`,
+    description: input.description ?? source.description,
+    types,
+    template_id: source.template_id,
+    mc_server: source.mc_server,
+    owner_id: 'admin',
+    status: 'draft',
+    phase: 'planning',
+    session_id: null,
+    model: input.model !== undefined ? input.model : source.model,
+    model_switched: false,
+    agent: source.agent,
     validation: null,
     validation_revision: null,
     created_at: new Date().toISOString(),

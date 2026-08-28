@@ -344,3 +344,31 @@ ol {
   opacity: 0;
   transform: translateY(-4px);
 }
+
+/* ---------- 全局动画（DRY：多组件共用，消除重复定义） ---------- */
+
+/** 旋转：加载/同步状态图标 */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/** 脉冲：进行中指示点 */
+.pulse {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}

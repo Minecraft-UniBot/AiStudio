@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useStudioStore } from '@/stores/studio'
 import { use_toast } from '@/composables/use_toast'
+import { format_relative_time } from '@/utils/format'
 import DevelopmentToolbar from '@/components/studio/DevelopmentToolbar.vue'
 import ConversationPanel from '@/components/studio/ConversationPanel.vue'
 import DraftFileTree from '@/components/studio/DraftFileTree.vue'
@@ -313,8 +314,12 @@ async function syncEnv() {
 }
 
 // ===== 发布 =====
+/** 是否为覆盖发布模式（目标目录已存在同 ID 扩展） */
+const publishIsUpdate = ref(false)
+
 function openPublish() {
   if (!canPublish.value) return
+  publishIsUpdate.value = false
   publishOpen.value = true
 }
 
@@ -327,11 +332,18 @@ function openMarket() {
 async function confirmPublish() {
   publishing.value = true
   try {
-    await store.publish(draftId)
+    await store.publish(draftId, publishIsUpdate.value)
     publishOpen.value = false
-    toast_success('发布成功！重启 UniBot 后扩展生效。')
+    publishIsUpdate.value = false
+    toast_success(publishIsUpdate.value ? '覆盖发布成功！重启 UniBot 后扩展生效。' : '发布成功！重启 UniBot 后扩展生效。')
     await store.fetchDraft(draftId)
   } catch (e) {
+    // 目标已存在 → 切换到覆盖发布模式，让用户确认
+    if (e.message?.includes('已存在') || e.message?.includes('使用「更新发布」')) {
+      publishIsUpdate.value = true
+      toast_error('目标扩展已存在，已切换到覆盖发布模式，请再次确认')
+      return
+    }
     toast_error(e.message)
   } finally {
     publishing.value = false
@@ -573,14 +585,14 @@ onUnmounted(() => {
                     </span>
                   </dd>
                   <dt>创建时间</dt>
-                  <dd>{{ new Date(draft.created_at).toLocaleString() }}</dd>
+                  <dd>{{ format_relative_time(draft.created_at) }}</dd>
                   <dt>最近更新</dt>
-                  <dd>{{ new Date(draft.updated_at).toLocaleString() }}</dd>
+                  <dd>{{ format_relative_time(draft.updated_at) }}</dd>
                 </dl>
               </div>
               <div v-if="draft.status === 'published'" class="result-section status-box success">
                 <Icon icon="lucide:check-circle-2" width="16" />
-                <span>已发布（{{ new Date(draft.published_at).toLocaleString() }}），草稿为只读</span>
+                <span>已发布（{{ format_relative_time(draft.published_at) }}），草稿为只读</span>
               </div>
             </div>
           </div>
@@ -596,6 +608,7 @@ onUnmounted(() => {
       v-model="publishOpen"
       :draft="draft"
       :publishing="publishing"
+      :is-update="publishIsUpdate"
       @confirm="confirmPublish"
     />
 

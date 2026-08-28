@@ -449,7 +449,8 @@ function toggleExtraType(type) {
   transition:
     border-color var(--transition),
     color var(--transition),
-    background-color var(--transition);
+    background-color var(--transition),
+    box-shadow var(--transition);
 }
 
 .type-chip:hover {
@@ -461,6 +462,7 @@ function toggleExtraType(type) {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .row {
@@ -489,12 +491,14 @@ function toggleExtraType(type) {
   cursor: pointer;
   transition:
     border-color var(--transition),
-    color var(--transition);
+    color var(--transition),
+    background-color var(--transition);
 }
 
 .pick-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .pick-btn:disabled {

@@ -155,6 +155,18 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   /**
+   * 克隆草稿：基于已有草稿创建副本，复制工作区文件，重置运行状态。
+   * input 可选字段：extension_id / name / description / types / model。
+   * 返回新草稿对象，并刷新草稿列表。
+   */
+  async function cloneDraft(id, input = {}) {
+    const data = await api(`/drafts/${id}/clone`, { method: 'POST', body: input })
+    // 刷新列表以包含新草稿
+    await fetchDrafts()
+    return data.draft
+  }
+
+  /**
    * 开发途中切换模型（每个草稿仅一次）：model 为 { provider_id, model_id } 或 null（回到自动）。
    * 返回更新后的草稿；后端校验状态与切换次数，失败时抛错。
    */
@@ -262,8 +274,8 @@ export const useStudioStore = defineStore('studio', () => {
     return await api('/unibot-env/sync', { method: 'POST' })
   }
 
-  async function publish(id) {
-    return await api(`/drafts/${id}/publish`, { method: 'POST' })
+  async function publish(id, update = false) {
+    return await api(`/drafts/${id}/publish`, { method: 'POST', body: { update } })
   }
 
   // ---- 插件市场 ----
@@ -433,6 +445,7 @@ export const useStudioStore = defineStore('studio', () => {
     createDraft,
     fetchDraft,
     removeDraft,
+    cloneDraft,
     switchModel,
     fetchMessages,
     sendPrompt,

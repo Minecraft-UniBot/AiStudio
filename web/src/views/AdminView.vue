@@ -178,7 +178,7 @@ const marketBadge = computed(() => {
       </div>
 
       <!-- 功能开关 -->
-      <section v-if="settings" class="card">
+      <section v-if="settings" class="card feature-card">
         <header class="card-top">
           <span class="card-icon"><Icon icon="lucide:sliders-horizontal" width="16" /></span>
           <div class="card-titles">
@@ -222,7 +222,7 @@ const marketBadge = computed(() => {
       </section>
 
       <!-- 模型提供商：内置仅保留 OpenCode Zen 免费网关，其余走自定义 OpenAI 兼容 -->
-      <section class="card">
+      <section class="card provider-card">
         <header class="card-top">
           <span class="card-icon"><Icon icon="lucide:boxes" width="16" /></span>
           <div class="card-titles">
@@ -273,7 +273,7 @@ const marketBadge = computed(() => {
       </section>
 
       <!-- 工具注册表 -->
-      <section class="card">
+      <section class="card tools-card">
         <header class="card-top">
           <span class="card-icon"><Icon icon="lucide:wrench" width="16" /></span>
           <div class="card-titles">
@@ -542,6 +542,21 @@ const marketBadge = computed(() => {
 .card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
+}
+
+/* 功能开关卡片：蓝色顶部指示 */
+.card.feature-card {
+  border-top: 2px solid var(--accent);
+}
+
+/* 提供商卡片：紫色顶部指示 */
+.card.provider-card {
+  border-top: 2px solid #8b5cf6;
+}
+
+/* 工具卡片：橙色顶部指示 */
+.card.tools-card {
+  border-top: 2px solid var(--warning);
 }
 
 .card-top {

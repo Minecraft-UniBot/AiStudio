@@ -801,11 +801,6 @@ function todo_priority_class(priority) {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
 /* ---------- todowrite 任务清单 ---------- */
 .todo-list {
   border-top: 1px solid var(--border);
@@ -1049,11 +1044,5 @@ function todo_priority_class(priority) {
 
 .spin {
   animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>
