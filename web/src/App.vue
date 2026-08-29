@@ -14,6 +14,45 @@ const store = useStudioStore()
 const { start, stop } = use_studio_events()
 const { toast_list, dismiss_toast, pause_toast, resume_toast } = use_toast()
 
+// ---- 主题初始化（亮色 / 暗色 / 跟随系统） ----
+const THEME_KEY = 'studio_theme'
+
+function applyTheme(theme) {
+  const root = document.documentElement
+  if (theme === 'dark') {
+    root.dataset.theme = 'dark'
+  } else if (theme === 'light') {
+    delete root.dataset.theme
+  } else {
+    // 跟随系统
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      root.dataset.theme = 'dark'
+    } else {
+      delete root.dataset.theme
+    }
+  }
+}
+
+// 导出主题设置方法供其他组件使用（如 AdminView 设置页）
+window.__studio_setTheme = (theme) => {
+  localStorage.setItem(THEME_KEY, theme)
+  applyTheme(theme)
+}
+
+window.__studio_getTheme = () => localStorage.getItem(THEME_KEY) ?? 'system'
+
+// 初始化：同步读取并应用（避免闪烁）
+applyTheme(localStorage.getItem(THEME_KEY) ?? 'system')
+
+// 监听系统主题变化（仅在跟随系统模式下生效）
+const mq = window.matchMedia('(prefers-color-scheme: dark)')
+function onSystemThemeChange() {
+  if ((localStorage.getItem(THEME_KEY) ?? 'system') === 'system') {
+    applyTheme('system')
+  }
+}
+mq.addEventListener('change', onSystemThemeChange)
+
 // 事件连接跟随登录状态：登录后（有 token）连接，登出后断开。
 // 不能只在 mount 时连接一次——登录发生在 LoginView，路由跳转后
 // LoginView 的 use_studio_events 会 stop，这里统一接管。
@@ -32,6 +71,7 @@ watch(
 
 onUnmounted(() => {
   stop()
+  mq.removeEventListener('change', onSystemThemeChange)
 })
 </script>
 
@@ -232,6 +272,14 @@ onUnmounted(() => {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(24px) scale(0.97);
+}
+</style>
+
+<!-- 暗色模式 toast 适配（非 scoped，覆盖内联硬编码色值） -->
+<style>
+[data-theme="dark"] .toast-item {
+  background: rgb(24 24 27 / 0.95);
+  border-color: rgb(63 63 70 / 0.9);
 }
 </style>
 

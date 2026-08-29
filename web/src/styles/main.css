@@ -85,6 +85,32 @@
   --mono: var(--font-mono);
 }
 
+/* ---------- 暗色模式 ---------- */
+[data-theme="dark"] {
+  --bg: #0a0a0b;
+  --surface: #18181b;
+  --surface-sunken: #111113;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #fafafa;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-soft: #1e293b;
+  --success: #22c55e;
+  --success-soft: #052e16;
+  --warning: #f59e0b;
+  --warning-soft: #422006;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --danger-soft: #450a0a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.5);
+  --bg-hover: #27272a;
+}
+
 /* ---------- Reset ---------- */
 
 *,

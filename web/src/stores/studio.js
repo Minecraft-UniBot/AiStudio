@@ -278,6 +278,19 @@ export const useStudioStore = defineStore('studio', () => {
     return await api(`/drafts/${id}/publish`, { method: 'POST', body: { update } })
   }
 
+  // ---- 版本号管理 ----
+  /** 读取草稿扩展的当前版本号（从 Extension.toml 解析） */
+  async function fetchVersion(id) {
+    const data = await api(`/drafts/${id}/version`)
+    return data.version
+  }
+
+  /** 更新草稿扩展的版本号（重写 Extension.toml） */
+  async function updateVersion(id, version) {
+    await api(`/drafts/${id}/version`, { method: 'PATCH', body: { version } })
+    return version
+  }
+
   // ---- 插件市场 ----
   /** 拉取市场登录态/配置（git 身份、gh 登录、token、owner 解析） */
   async function fetchMarketStatus() {
@@ -461,6 +474,8 @@ export const useStudioStore = defineStore('studio', () => {
     checkValidation,
     syncUnibotEnv,
     publish,
+    fetchVersion,
+    updateVersion,
     fetchMarketStatus,
     saveMarketConfig,
     startMarketPublish,

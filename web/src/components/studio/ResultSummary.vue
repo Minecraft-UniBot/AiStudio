@@ -1,10 +1,13 @@
 <script setup>
-// 功能结果摘要（Plan 3.4 右栏「功能」Tab）：扩展信息 + 机械校验状态 + 发布入口
-import { computed } from 'vue'
+// 功能结果摘要（Plan 3.4 右栏「功能」Tab）：扩展信息 + 版本号 + 机械校验状态 + 发布入口
+import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
+import { useStudioStore } from '@/stores/studio'
+import { use_toast } from '@/composables/use_toast'
 import { TYPE_LABELS, STATUS_LABELS, status_variant } from '@/utils/draft_status'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
+import Input from '@/components/ui/Input.vue'
 
 const props = defineProps({
   draft: { type: Object, required: true },
@@ -13,6 +16,63 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['publish', 'market'])
+
+const store = useStudioStore()
+const { success: toast_success, error: toast_error } = use_toast()
+
+// ---- 版本号管理 ----
+const version = ref(null)
+const versionEditing = ref(false)
+const versionInput = ref('')
+const versionSaving = ref(false)
+
+async function loadVersion() {
+  try {
+    version.value = await store.fetchVersion(props.draft.id)
+  } catch {
+    version.value = null
+  }
+}
+
+// 草稿切换时重新加载版本号
+watch(() => props.draft.id, () => loadVersion(), { immediate: true })
+
+function startEditVersion() {
+  versionInput.value = version.value || '0.1.0'
+  versionEditing.value = true
+}
+
+function cancelEditVersion() {
+  versionEditing.value = false
+}
+
+/** 快捷递增版本号 */
+function bumpVersion(type) {
+  const parts = (versionInput.value || '0.1.0').split('.')
+  if (type === 'major') {
+    versionInput.value = `${Number(parts[0] || 0) + 1}.0.0`
+  } else if (type === 'minor') {
+    versionInput.value = `${parts[0] || 0}.${Number(parts[1] || 0) + 1}.0`
+  } else {
+    versionInput.value = `${parts[0] || 0}.${parts[1] || 0}.${Number(parts[2] || 0) + 1}`
+  }
+}
+
+async function saveVersion() {
+  const v = versionInput.value.trim()
+  if (!v) return
+  versionSaving.value = true
+  try {
+    await store.updateVersion(props.draft.id, v)
+    version.value = v
+    versionEditing.value = false
+    toast_success(`版本号已更新为 v${v}`)
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    versionSaving.value = false
+  }
+}
 
 const types = computed(() => props.draft.types.map((type) => TYPE_LABELS[type]).filter(Boolean))
 const statusLabel = computed(() => STATUS_LABELS[props.draft.status] ?? props.draft.status)
@@ -54,7 +114,7 @@ const inProgressText = computed(() =>
 
 <template>
   <div class="result-summary">
-    <!-- 扩展信息卡：图标 + 名称 + ID + 状态徽章 -->
+    <!-- 扩展信息卡：图标 + 名称 + ID + 版本号 + 状态徽章 -->
     <section class="ext-card">
       <div class="ext-card-head">
         <div class="ext-icon">
@@ -71,6 +131,40 @@ const inProgressText = computed(() =>
       <p v-if="draft.description" class="ext-desc">{{ draft.description }}</p>
       <div v-if="types.length" class="ext-types">
         <Badge v-for="t in types" :key="t" variant="accent" class="ext-type">{{ t }}</Badge>
+      </div>
+
+      <!-- 版本号管理：显示当前版本，可编辑（已发布草稿只读） -->
+      <div class="version-row">
+        <template v-if="!versionEditing">
+          <span class="version-label">版本</span>
+          <span class="version-value mono">{{ version ? `v${version}` : '—' }}</span>
+          <Button
+            v-if="draft.status !== 'published'"
+            variant="ghost"
+            icon-only
+            size="sm"
+            title="编辑版本号"
+            @click="startEditVersion"
+          >
+            <Icon icon="lucide:pencil" width="12" />
+          </Button>
+        </template>
+        <template v-else>
+          <div class="version-edit">
+            <Input
+              v-model="versionInput"
+              placeholder="0.1.0"
+              class="version-input"
+              @keyup.enter="saveVersion"
+              @keyup.escape="cancelEditVersion"
+            />
+            <Button size="sm" variant="ghost" @click="bumpVersion('patch')" title="递增 patch">+patch</Button>
+            <Button size="sm" variant="ghost" @click="bumpVersion('minor')" title="递增 minor">+minor</Button>
+            <Button size="sm" variant="ghost" @click="bumpVersion('major')" title="递增 major">+major</Button>
+            <Button size="sm" variant="primary" :loading="versionSaving" @click="saveVersion">保存</Button>
+            <Button size="sm" variant="ghost" @click="cancelEditVersion">取消</Button>
+          </div>
+        </template>
       </div>
     </section>
 
@@ -248,6 +342,40 @@ const inProgressText = computed(() =>
 
 .ext-type {
   font-size: 11px;
+}
+
+/* ---------- 版本号管理 ---------- */
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.version-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.version-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.version-edit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.version-input {
+  width: 120px;
+  flex-shrink: 0;
 }
 
 /* ---------- 状态卡 ---------- */

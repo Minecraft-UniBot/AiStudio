@@ -153,6 +153,26 @@ const marketBadge = computed(() => {
     ? { label: '已就绪', variant: 'success' }
     : { label: '未就绪', variant: 'warning' }
 })
+
+// ---- 外观主题 ----
+const themeOptions = [
+  { value: 'light', label: '亮色', icon: 'lucide:sun' },
+  { value: 'dark', label: '暗色', icon: 'lucide:moon' },
+  { value: 'system', label: '跟随系统', icon: 'lucide:monitor' },
+]
+
+const currentTheme = ref('system')
+
+function setTheme(theme) {
+  currentTheme.value = theme
+  window.__studio_setTheme?.(theme)
+  toast_success(`主题已切换为「${themeOptions.find((t) => t.value === theme)?.label ?? theme}」`)
+}
+
+// 初始化：从全局方法读取当前主题
+onMounted(() => {
+  currentTheme.value = window.__studio_getTheme?.() ?? 'system'
+})
 </script>
 
 <template>
@@ -176,6 +196,31 @@ const marketBadge = computed(() => {
         <h1>平台设置</h1>
         <p>管理功能开关、模型提供商、OpenCode 工具注册表与提示词模板</p>
       </div>
+
+      <!-- 外观主题 -->
+      <section class="card">
+        <header class="card-top">
+          <span class="card-icon"><Icon icon="lucide:palette" width="16" /></span>
+          <div class="card-titles">
+            <h3>外观主题</h3>
+            <p>切换亮色 / 暗色 / 跟随系统</p>
+          </div>
+        </header>
+        <div class="card-body">
+          <div class="theme-options">
+            <button
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              class="theme-btn"
+              :class="{ active: currentTheme === opt.value }"
+              @click="setTheme(opt.value)"
+            >
+              <Icon :icon="opt.icon" width="16" />
+              <span>{{ opt.label }}</span>
+            </button>
+          </div>
+        </div>
+      </section>
 
       <!-- 功能开关 -->
       <section v-if="settings" class="card feature-card">
@@ -859,5 +904,40 @@ const marketBadge = computed(() => {
 .form-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ---- 主题切换 ---- */
+.theme-options {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.theme-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    color var(--transition);
+}
+
+.theme-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.theme-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
 }
 </style>

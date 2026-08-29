@@ -11,6 +11,8 @@ defineProps({
   publishing: { type: Boolean, default: false },
   /** 是否为覆盖发布（目标目录已存在同 ID 扩展） */
   isUpdate: { type: Boolean, default: false },
+  /** 当前版本号（从 Extension.toml 读取） */
+  version: { type: String, default: null },
 })
 
 const emit = defineEmits(['confirm'])
@@ -33,6 +35,10 @@ const emit = defineEmits(['confirm'])
       <div class="summary-row">
         <span class="label">扩展</span>
         <span class="value mono">{{ draft.name }}（{{ draft.extension_id }}）</span>
+      </div>
+      <div v-if="version" class="summary-row">
+        <span class="label">版本</span>
+        <span class="value mono">v{{ version }}</span>
       </div>
       <div class="summary-row">
         <span class="label">功能描述</span>

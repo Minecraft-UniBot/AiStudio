@@ -82,6 +82,27 @@ const placeholder = computed(() =>
   props.busy ? 'AI 正在处理中…' : '继续描述需求、提出修改，或询问扩展用法…（Enter 发送，Shift+Enter 换行）',
 )
 
+// ---- 消息导航：提取用户消息位置，支持快速跳转 ----
+const user_messages = computed(() =>
+  props.messages
+    .filter((m) => m.info?.role === 'user')
+    .map((m, i) => ({
+      id: m.info?.id ?? '',
+      index: i + 1,
+      text: (m.info?.content ?? '').slice(0, 40),
+    })),
+)
+
+function scrollToMessage(messageId) {
+  const el = document.getElementById(`msg-${messageId}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // 闪烁高亮效果
+    el.classList.add('msg-highlight')
+    setTimeout(() => el.classList.remove('msg-highlight'), 1500)
+  }
+}
+
 /** 距底部多少像素内视为「在底部」 */
 const BOTTOM_THRESHOLD = 56
 /** 用户离开底部后，静默多久自动滚回底部（毫秒） */
@@ -200,6 +221,19 @@ function onKeydown(e) {
       <div ref="messageEl" />
     </div>
 
+    <!-- 消息导航浮标：用户消息 ≥3 条时显示，点击快速跳转到指定用户消息 -->
+    <div v-if="user_messages.length >= 3" class="msg-nav">
+      <button
+        v-for="msg in user_messages"
+        :key="msg.id"
+        class="msg-nav-dot"
+        :title="`#${msg.index} ${msg.text}`"
+        @click="scrollToMessage(msg.id)"
+      >
+        <span class="msg-nav-num">{{ msg.index }}</span>
+      </button>
+    </div>
+
     <!-- 待处理授权 / 提问：固定在输入框上方，AI 卡住时无需滚动即可处理 -->
     <div v-if="pendingPermissions.length || pendingQuestions.length" class="pending-bar">
       <div class="pending-bar-head">
@@ -311,6 +345,7 @@ function onKeydown(e) {
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+  position: relative;
 }
 
 .message-scroll {
@@ -320,6 +355,60 @@ function onKeydown(e) {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+/* ---------- 消息导航浮标 ---------- */
+.msg-nav {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+
+.msg-nav-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    color var(--transition),
+    border-color var(--transition),
+    transform var(--transition);
+  box-shadow: var(--shadow);
+}
+
+.msg-nav-dot:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: scale(1.15);
+}
+
+.msg-nav-num {
+  line-height: 1;
+}
+
+/* 用户消息高亮闪烁（跳转后短暂标记） */
+.msg-highlight {
+  animation: msg-flash 1.5s ease-out;
+}
+
+@keyframes msg-flash {
+  0% { background: var(--accent-soft); }
+  100% { background: transparent; }
 }
 
 /* ---------- 待处理授权 / 提问：固定在输入框上方的处理条 ---------- */

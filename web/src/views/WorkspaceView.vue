@@ -316,10 +316,14 @@ async function syncEnv() {
 // ===== 发布 =====
 /** 是否为覆盖发布模式（目标目录已存在同 ID 扩展） */
 const publishIsUpdate = ref(false)
+/** 发布确认时展示的版本号 */
+const publishVersion = ref(null)
 
-function openPublish() {
+async function openPublish() {
   if (!canPublish.value) return
   publishIsUpdate.value = false
+  // 加载当前版本号供发布确认弹窗展示
+  try { publishVersion.value = await store.fetchVersion(draftId) } catch { publishVersion.value = null }
   publishOpen.value = true
 }
 
@@ -609,6 +613,7 @@ onUnmounted(() => {
       :draft="draft"
       :publishing="publishing"
       :is-update="publishIsUpdate"
+      :version="publishVersion"
       @confirm="confirmPublish"
     />
 

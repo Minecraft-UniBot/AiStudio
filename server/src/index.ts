@@ -27,9 +27,11 @@ import {
   promptModelChoice,
   readDraft,
   readDraftFile,
+  readDraftVersion,
   resolveDraftPath,
   sanitizeTypes,
   updateDraft,
+  updateDraftVersion,
 } from './studio/drafts';
 import { publishDraft, PublishError } from './studio/publishing';
 import { getMarketStatus, saveMarketConfig, startMarketPublish, MarketError } from './studio/market';
@@ -681,6 +683,28 @@ async function handleRequest(req: Request): Promise<Response> {
               to: updated.model ? `${updated.model.provider_id}/${updated.model.model_id}` : 'auto',
             });
             return json(updated);
+          }
+          break;
+        }
+        case 'version': {
+          // 更新扩展版本号（重写 Extension.toml）：发布前设置/递增版本号，
+          // 避免用户手动编辑 TOML 文件。校验语义化版本格式。
+          if (req.method === 'GET') {
+            const version = readDraftVersion(draftId);
+            return json({ version });
+          }
+          if (req.method === 'PATCH') {
+            if (draft.status === 'published') return errorJson('已发布草稿为只读', 1, 400);
+            const body = (await req.json().catch(() => ({}))) as { version?: string };
+            if (!body.version) return errorJson('缺少 version 字段');
+            try {
+              const updated = updateDraftVersion(draftId, body.version);
+              broadcast({ type: 'draft.updated', draft_id: draftId, status: draft.status });
+              return json({ version: updated });
+            } catch (e) {
+              if (e instanceof DraftError) return errorJson(e.message, 1, 400);
+              throw e;
+            }
           }
           break;
         }

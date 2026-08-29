@@ -599,3 +599,44 @@ export function inferResumeStatus(draft: DraftMeta): 'planning' | 'coding' {
   if (draft.phase === 'planning' || draft.phase === 'coding') return draft.phase;
   return existsSync(join(draftWorkspace(draft.id), 'PLAN.md')) ? 'coding' : 'planning';
 }
+
+/**
+ * 读取草稿扩展的当前版本号（从 Extension.toml 解析）。
+ * 版本号写在 [extension] 段的 version 字段。
+ */
+export function readDraftVersion(draftId: string): string | null {
+  const draft = readDraft(draftId);
+  const tomlFile = join(draftWorkspace(draftId), draft.extension_id, 'Extension.toml');
+  if (!existsSync(tomlFile)) return null;
+  try {
+    const doc = parseToml(readFileSync(tomlFile, 'utf-8')) as Record<string, unknown>;
+    const ext = (doc.extension ?? {}) as Record<string, unknown>;
+    return typeof ext.version === 'string' ? ext.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 更新草稿扩展的版本号（重写 Extension.toml 的 [extension].version）。
+ * 校验语义化版本格式（x.y.z，x/y/z 为非负整数）。
+ */
+export function updateDraftVersion(draftId: string, version: string): string {
+  if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) {
+    throw new DraftError('版本号格式无效，应为语义化版本（如 0.1.0、1.0.0-beta.1）', 'INVALID_VERSION');
+  }
+  const draft = readDraft(draftId);
+  const tomlFile = join(draftWorkspace(draftId), draft.extension_id, 'Extension.toml');
+  if (!existsSync(tomlFile)) {
+    throw new DraftError('Extension.toml 不存在', 'NOT_FOUND');
+  }
+  const content = readFileSync(tomlFile, 'utf-8');
+  const doc = parseToml(content) as Record<string, unknown>;
+  if (!doc.extension) {
+    throw new DraftError('Extension.toml 缺少 [extension] 段', 'INVALID_MANIFEST');
+  }
+  (doc.extension as Record<string, unknown>).version = version;
+  writeFileSync(tomlFile, stringifyToml(doc), 'utf-8');
+  logger.info('draft', '更新扩展版本号', { draft_id: draftId, version });
+  return version;
+}

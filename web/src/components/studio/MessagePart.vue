@@ -149,7 +149,7 @@ function todo_priority_class(priority) {
     </span>
     <span class="checkpoint-line" />
   </div>
-  <div v-else class="message" :class="{ user: isUser }">
+  <div v-else class="message" :class="{ user: isUser }" :id="isUser ? `msg-${messageId}` : undefined">
     <div class="avatar">
       <Icon :icon="isUser ? 'lucide:user' : 'lucide:bot'" width="15" />
     </div>
