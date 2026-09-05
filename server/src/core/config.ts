@@ -43,6 +43,14 @@ function loadConfig(): StudioConfig {
   const dataDir = process.env.UNIBOT_STUDIO_DATA_DIR ?? DEFAULT_DATA_DIR;
   const configFile = join(dataDir, 'config', 'studio.json');
 
+  // 前端静态资源目录：环境变量显式指定优先；否则自动探测仓库内 web/dist 构建产物
+  //（开发模式也能让后端同源提供前端页面，启动横幅的 ?token= 链接可直接访问）
+  function detectStaticDir(): string {
+    if (process.env.UNIBOT_STUDIO_STATIC_DIR) return process.env.UNIBOT_STUDIO_STATIC_DIR;
+    const webDist = join(srcRootDir(), '..', '..', 'web', 'dist');
+    return existsSync(join(webDist, 'index.html')) ? webDist : '';
+  }
+
   const base: StudioConfig = {
     data_dir: dataDir,
     unibot_dir: detectUnibotDir(),
@@ -50,7 +58,7 @@ function loadConfig(): StudioConfig {
     extensions_dir: join(detectUnibotDir(), 'Extensions'),
     host: process.env.UNIBOT_STUDIO_HOST ?? '127.0.0.1',
     port: Number(process.env.UNIBOT_STUDIO_PORT ?? 9876),
-    static_dir: process.env.UNIBOT_STUDIO_STATIC_DIR ?? '',
+    static_dir: detectStaticDir(),
     opencode: {
       bin: process.env.OPENCODE_BIN ?? 'opencode',
       // 与 server/package.json 的 @opencode-ai/sdk 版本一致；
@@ -109,6 +117,8 @@ function loadConfig(): StudioConfig {
   const merged: StudioConfig = {
     ...base,
     ...disk,
+    // static_dir 磁盘值若为空串（开发模式默认），保留自动探测结果
+    static_dir: disk.static_dir || base.static_dir,
     opencode: { ...base.opencode, ...(disk.opencode ?? {}) },
     unibot_env: { ...base.unibot_env, ...(disk.unibot_env ?? {}) },
     market: { ...base.market, ...(disk.market ?? {}) },

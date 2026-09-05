@@ -82,12 +82,15 @@ import type { DraftMeta } from './core/types';
 
 // ===== 认证（HMAC 签名 token，密钥持久化，后端重启后仍有效；签发/校验见 auth.ts） =====
 
-function isAuthorized(req: Request): boolean {
+function isAuthorized(req: Request, url?: URL): boolean {
   const auth = req.headers.get('authorization') ?? '';
   if (auth.startsWith('Bearer ')) return verifyToken(auth.slice(7));
   // 允许通过 cookie 或 x-studio-token 头
   const header = req.headers.get('x-studio-token');
-  return header ? verifyToken(header) : false;
+  if (header) return verifyToken(header);
+  // 允许通过 URL query 的 token（启动横幅打印的 ?token= 直接访问链接）
+  const queryToken = url?.searchParams.get('token') ?? '';
+  return queryToken ? verifyToken(queryToken) : false;
 }
 
 function json(data: unknown, code = 0, message = ''): Response {
@@ -151,7 +154,7 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 
   // 除登录外全部要求认证
-  if (!isAuthorized(req)) {
+  if (!isAuthorized(req, url)) {
     logger.warn('auth', '未授权访问', { path, method: req.method });
     return errorJson('未授权', 401, 401);
   }
@@ -1204,9 +1207,7 @@ const server = Bun.serve({
     const url = new URL(req.url);
     if (url.pathname === '/api/studio/events') {
       // WebSocket 无法携带自定义 header，token 通过 query 传递
-      const queryToken = url.searchParams.get('token') ?? '';
-      const headerToken = req.headers.get('authorization')?.replace('Bearer ', '') ?? '';
-      if (!isAuthorized(req) && !verifyToken(queryToken) && !verifyToken(headerToken)) {
+      if (!isAuthorized(req, url)) {
         logger.warn('ws', 'WebSocket 未授权连接被拒绝');
         return Response.json({ code: 401, data: null, message: '未授权' }, { status: 401 });
       }
