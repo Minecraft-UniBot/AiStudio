@@ -137,7 +137,7 @@ async function resolveReleaseUrl(): Promise<{ url: string; tag: string }> {
 }
 
 /** 下载文件到本地（重定向跟随，失败抛错） */
-async function downloadFile(url: string, dest: string): Promise<void> {
+export async function downloadFile(url: string, dest: string): Promise<void> {
   const response = await fetch(url, { redirect: 'follow' });
   if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`);
   const buffer = Buffer.from(await response.arrayBuffer());

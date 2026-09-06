@@ -77,7 +77,7 @@ defineProps({
 }
 
 .ui-button--ghost:hover:not(:disabled) {
-  background: rgb(0 0 0 / 0.05);
+  background: var(--bg-hover);
   color: var(--text);
 }
 

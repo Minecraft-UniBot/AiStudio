@@ -1,8 +1,8 @@
 <script setup>
 // 上传插件市场对话框：登录态检测 + 步骤进度 + 结果链接
 // 流程（后端 studio/market.ts）：precheck → auth → scaffold → commit → repo → push → release → asset → market_pr
-// 全部通过 git/gh 命令行驱动；未登录时展示引导（终端 gh auth login 或去平台设置粘贴 PAT）
-import { onMounted, watch, ref, computed } from 'vue'
+// 全部通过 git/gh 命令行驱动；未登录时可在弹窗内一键登录（gh auth login --web 后台执行）
+import { onMounted, watch, ref, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useStudioStore } from '@/stores/studio'
@@ -72,6 +72,101 @@ async function startUpload() {
   }
 }
 
+/** 安装 GitHub CLI（gh 未安装时从 cli/cli releases 拉取当前系统安装包） */
+const installingGh = ref(false)
+async function installGh() {
+  installingGh.value = true
+  try {
+    const info = await store.installGhCli()
+    if (info.in_path) {
+      toast_success(`GitHub CLI 已安装（v${info.version ?? ''}），可重新检测登录态`)
+    } else {
+      toast_success(`GitHub CLI 已安装到 ${info.bin_path}，请将该目录加入 PATH 后重试`)
+    }
+    await loadStatus()
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    installingGh.value = false
+  }
+}
+
+// ===== GitHub 登录（后台执行 gh auth login --web） =====
+
+/** 登录进行中 / 已获取 one-time code */
+const loggingIn = ref(false)
+/** 后端返回的登录信息（code + url） */
+const loginInfo = ref(null)
+/** 登录状态轮询定时器 */
+let loginPollTimer = null
+
+/** 一键登录：后端启动 gh auth login --web，返回 one-time code + URL 供展示 */
+async function startLogin() {
+  loggingIn.value = true
+  loginInfo.value = null
+  try {
+    const info = await store.startGhLogin()
+    if (info.pending && info.code) {
+      loginInfo.value = info
+      toast_success('已生成登录验证码，请在浏览器完成授权')
+      // 轮询检测登录态（授权完成后自动刷新）
+      startLoginPolling()
+    } else {
+      toast_success('GitHub 已登录')
+      await loadStatus()
+    }
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    loggingIn.value = false
+  }
+}
+
+/** 轮询登录态：授权完成后停止轮询并刷新状态 */
+function startLoginPolling() {
+  stopLoginPolling()
+  loginPollTimer = setInterval(async () => {
+    await loadStatus()
+    if (store.marketStatus?.gh_authed) {
+      stopLoginPolling()
+      loginInfo.value = null
+      toast_success('GitHub 登录成功')
+    }
+  }, 2000)
+}
+
+function stopLoginPolling() {
+  if (loginPollTimer) {
+    clearInterval(loginPollTimer)
+    loginPollTimer = null
+  }
+}
+
+/** 取消登录（关闭弹窗/放弃时调用） */
+async function cancelLogin() {
+  stopLoginPolling()
+  loginInfo.value = null
+  try {
+    await store.cancelGhLogin()
+  } catch {
+    // 取消失败不影响关闭
+  }
+}
+
+/** 复制一次性验证码到剪贴板 */
+async function copyLoginCode() {
+  try {
+    await navigator.clipboard.writeText(loginInfo.value?.code ?? '')
+    toast_success('验证码已复制')
+  } catch {
+    toast_error('复制失败，请手动选择复制')
+  }
+}
+
+onUnmounted(() => {
+  stopLoginPolling()
+})
+
 /** 登录状态行：git 身份 / GitHub 登录 / owner */
 const authRows = computed(() => {
   const s = store.marketStatus
@@ -123,16 +218,18 @@ const resultLinks = computed(() => {
     <!-- 登录状态 -->
     <section class="auth-card">
       <div class="auth-head">
-        <span class="auth-title">GitHub 登录状态</span>
+        <div class="auth-head-left">
+          <span class="auth-icon"><Icon icon="lucide:github" width="16" /></span>
+          <span class="auth-title">GitHub 登录状态</span>
+        </div>
         <Badge :variant="statusBadge.variant">{{ statusBadge.label }}</Badge>
       </div>
+
       <div class="auth-rows">
         <div v-for="row in authRows" :key="row.label" class="auth-row">
-          <Icon
-            :icon="row.ok ? 'lucide:check-circle-2' : 'lucide:x-circle'"
-            width="15"
-            :class="row.ok ? 'ok' : 'no'"
-          />
+          <span class="auth-status-icon" :class="row.ok ? 'ok' : 'no'">
+            <Icon :icon="row.ok ? 'lucide:check' : 'lucide:x'" width="12" />
+          </span>
           <span class="auth-label">{{ row.label }}</span>
           <span class="auth-note">{{ row.note }}</span>
         </div>
@@ -142,11 +239,59 @@ const resultLinks = computed(() => {
       <div v-if="needsSetup" class="guidance">
         <p class="guidance-title">
           <Icon icon="lucide:info" width="14" />
-          需要先完成 GitHub 登录（在运行 Studio 的终端执行）：
+          需要先完成 GitHub 登录：
         </p>
-        <pre class="guidance-cmd">{{ store.marketStatus?.guidance }}</pre>
+
+        <!-- gh 未安装：一键安装 -->
+        <div v-if="!store.marketStatus?.gh_available" class="guidance-block">
+          <p class="guidance-desc">未检测到 GitHub CLI（gh），点击下方按钮自动下载并安装当前系统的安装包。</p>
+          <Button size="sm" :loading="installingGh" @click="installGh">
+            <Icon icon="lucide:download" width="13" />
+            {{ installingGh ? '安装中…' : '一键安装 GitHub CLI' }}
+          </Button>
+        </div>
+
+        <!-- gh 已安装但未登录：一键登录 -->
+        <div v-else-if="!store.marketStatus?.gh_authed" class="guidance-block">
+          <p class="guidance-desc">点击「登录 GitHub」生成一次性验证码，在浏览器中打开授权地址并输入验证码即可完成登录。</p>
+          <Button size="sm" variant="primary" :loading="loggingIn" @click="startLogin">
+            <Icon icon="lucide:log-in" width="13" />
+            {{ loggingIn ? '生成验证码中…' : '登录 GitHub' }}
+          </Button>
+        </div>
+
+        <!-- 其他未就绪原因（git 身份缺失等）：展示指引 -->
+        <pre v-else class="guidance-cmd">{{ store.marketStatus?.guidance }}</pre>
+
+        <!-- 登录验证码展示 -->
+        <div v-if="loginInfo" class="login-code">
+          <div class="login-code-head">
+            <Icon icon="lucide:key-round" width="14" />
+            <span>在浏览器中完成授权</span>
+          </div>
+          <ol class="login-steps">
+            <li>复制下方一次性验证码</li>
+            <li>
+              打开授权地址
+              <a :href="loginInfo.url" target="_blank" rel="noopener">{{ loginInfo.url }}</a>
+            </li>
+            <li>粘贴验证码并确认授权，完成后自动检测登录态</li>
+          </ol>
+          <div class="login-code-value">
+            <code>{{ loginInfo.code }}</code>
+            <Button size="sm" variant="ghost" @click="copyLoginCode">
+              <Icon icon="lucide:copy" width="13" /> 复制
+            </Button>
+          </div>
+          <div class="login-code-actions">
+            <Button size="sm" variant="ghost" @click="cancelLogin">
+              <Icon icon="lucide:x" width="13" /> 取消登录
+            </Button>
+          </div>
+        </div>
+
         <div class="guidance-actions">
-          <Button size="sm" @click="router.push('/admin')">
+          <Button size="sm" variant="ghost" @click="router.push('/admin')">
             <Icon icon="lucide:settings" width="13" /> 去设置粘贴 Token
           </Button>
         </div>
@@ -155,6 +300,7 @@ const resultLinks = computed(() => {
 
     <!-- 未开始：开始上传 -->
     <section v-if="!run || (run.status !== 'running' && run.status !== 'submitted')" class="start-card">
+      <div class="start-icon"><Icon icon="lucide:store" width="18" /></div>
       <p class="start-hint">
         将把校验通过的扩展按官方模板生成仓库并发布到插件市场；Release 资产由仓库内置的打包工作流生成。
       </p>
@@ -165,7 +311,7 @@ const resultLinks = computed(() => {
         :loading="starting"
         @click="startUpload"
       >
-        <Icon v-if="!starting" icon="lucide:store" width="15" />
+        <Icon v-if="!starting" icon="lucide:rocket" width="15" />
         {{ starting ? '启动中…' : '开始上传' }}
       </Button>
     </section>
@@ -188,11 +334,13 @@ const resultLinks = computed(() => {
           class="step-item"
           :class="stepVisual(step.status).cls"
         >
-          <Icon
-            :icon="stepVisual(step.status).icon"
-            width="15"
-            :class="{ spin: step.status === 'running' }"
-          />
+          <span class="step-icon" :class="stepVisual(step.status).cls">
+            <Icon
+              :icon="stepVisual(step.status).icon"
+              width="15"
+              :class="{ spin: step.status === 'running' }"
+            />
+          </span>
           <div class="step-main">
             <span class="step-name">{{ step.name }}</span>
             <span v-if="step.message" class="step-msg">{{ step.message }}</span>
@@ -237,16 +385,34 @@ const resultLinks = computed(() => {
   flex-direction: column;
   gap: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   padding: var(--space-4);
   background: var(--surface);
 }
 
+/* ---- 登录状态 ---- */
 .auth-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+}
+
+.auth-head-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.auth-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .auth-title {
@@ -268,11 +434,23 @@ const resultLinks = computed(() => {
   font-size: var(--text-sm);
 }
 
-.auth-row svg.ok {
+.auth-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.auth-status-icon.ok {
+  background: var(--success-soft);
   color: var(--success);
 }
 
-.auth-row svg.no {
+.auth-status-icon.no {
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
@@ -289,14 +467,14 @@ const resultLinks = computed(() => {
   white-space: nowrap;
 }
 
-/* 登录引导 */
+/* ---- 登录引导 ---- */
 .guidance {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-3);
   background: var(--warning-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--border-warning);
   border-radius: var(--radius);
 }
 
@@ -306,13 +484,28 @@ const resultLinks = computed(() => {
   gap: var(--space-1);
   margin: 0;
   font-size: var(--text-sm);
-  color: #92400e;
+  font-weight: 600;
+  color: var(--warning);
   line-height: 1.5;
 }
 
 .guidance-title svg {
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.guidance-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.guidance-desc {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .guidance-cmd {
@@ -331,9 +524,95 @@ const resultLinks = computed(() => {
 .guidance-actions {
   display: flex;
   justify-content: flex-end;
+  gap: var(--space-2);
 }
 
-/* 开始 */
+/* ---- 登录验证码 ---- */
+.login-code {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.login-code-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.login-code-head svg {
+  color: var(--accent);
+}
+
+.login-steps {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.login-steps a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.login-steps a:hover {
+  text-decoration: underline;
+}
+
+.login-code-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.login-code-value code {
+  font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  user-select: all;
+}
+
+.login-code-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---- 开始上传 ---- */
+.start-card {
+  align-items: center;
+  text-align: center;
+}
+
+.start-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .start-hint {
   margin: 0;
   font-size: var(--text-sm);
@@ -346,7 +625,7 @@ const resultLinks = computed(() => {
   justify-content: center;
 }
 
-/* 步骤进度 */
+/* ---- 步骤进度 ---- */
 .run-card {
   gap: var(--space-3);
 }
@@ -380,26 +659,45 @@ const resultLinks = computed(() => {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius);
   font-size: var(--text-sm);
+  transition: background 150ms ease-out;
 }
 
-.step-item svg {
+.step-item.running {
+  background: var(--accent-soft);
+}
+
+.step-item.failed {
+  background: var(--danger-soft);
+}
+
+.step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   flex-shrink: 0;
   margin-top: 1px;
 }
 
-.step-item.passed svg {
+.step-icon.passed {
+  background: var(--success-soft);
   color: var(--success);
 }
 
-.step-item.running svg {
+.step-icon.running {
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
-.step-item.failed svg {
+.step-icon.failed {
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
-.step-item.pending svg {
+.step-icon.pending {
+  background: var(--bg);
   color: var(--border-strong);
 }
 
@@ -431,7 +729,7 @@ const resultLinks = computed(() => {
   margin: 0;
   padding: var(--space-3);
   background: var(--danger-soft);
-  border: 1px solid #fecaca;
+  border: 1px solid var(--border-danger);
   border-radius: var(--radius);
   font-size: var(--text-sm);
   color: var(--danger);

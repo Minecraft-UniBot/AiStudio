@@ -125,12 +125,12 @@ const canRecheck = computed(
 }
 
 .validation-result.failed {
-  border-color: #fecaca;
+  border-color: var(--border-danger);
   background: var(--danger-soft);
 }
 
 .validation-result.passed {
-  border-color: #bbf7d0;
+  border-color: var(--border-success);
   background: var(--success-soft);
 }
 

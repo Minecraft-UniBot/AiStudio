@@ -313,6 +313,21 @@ export const useStudioStore = defineStore('studio', () => {
     return await api(`/drafts/${id}/market`, { method: 'POST' })
   }
 
+  /** 安装 GitHub CLI（gh 未安装时从 cli/cli releases 拉取当前系统安装包） */
+  async function installGhCli() {
+    return await api('/market/install-gh', { method: 'POST' })
+  }
+
+  /** 后台启动 GitHub 登录（gh auth login --web，返回 one-time code + URL） */
+  async function startGhLogin() {
+    return await api('/market/gh-login', { method: 'POST' })
+  }
+
+  /** 取消进行中的 GitHub 登录进程 */
+  async function cancelGhLogin() {
+    return await api('/market/gh-login/cancel', { method: 'POST' })
+  }
+
   /** 拉取当前草稿的市场上传运行记录（断线重连后的兜底） */
   async function fetchMarketRun(id) {
     return await api(`/drafts/${id}/market`)
@@ -479,6 +494,9 @@ export const useStudioStore = defineStore('studio', () => {
     fetchMarketStatus,
     saveMarketConfig,
     startMarketPublish,
+    installGhCli,
+    startGhLogin,
+    cancelGhLogin,
     fetchMarketRun,
     replyPermission,
     replyQuestion,

@@ -96,7 +96,7 @@ const emit = defineEmits(['open', 'remove', 'clone', 'create', 'refresh-status']
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   background: var(--warning-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--border-warning);
   border-radius: var(--radius-md);
   color: var(--warning);
   font-size: var(--text-sm);

@@ -414,7 +414,7 @@ const inProgressText = computed(() =>
 .status-card.passed {
   color: var(--success);
   background: var(--success-soft);
-  border-color: #bbf7d0;
+  border-color: var(--border-success);
 }
 
 .status-card.passed .status-title {
@@ -428,7 +428,7 @@ const inProgressText = computed(() =>
 .status-card.failed {
   color: var(--danger);
   background: var(--danger-soft);
-  border-color: #fecaca;
+  border-color: var(--border-danger);
 }
 
 .status-card.failed .status-title {
@@ -452,7 +452,7 @@ const inProgressText = computed(() =>
 .status-card.running {
   color: var(--accent);
   background: var(--accent-soft);
-  border-color: #bfdbfe;
+  border-color: var(--border-info);
 }
 
 .status-card.running .status-title {

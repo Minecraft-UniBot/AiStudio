@@ -80,7 +80,7 @@ async function login() {
   padding: var(--space-4);
   /* 双层渐变：对角蓝色 + 柔和暖调，营造专业而温暖的第一印象 */
   background:
-    radial-gradient(circle at 75% 80%, rgb(239 244 255 / 0.6), transparent 50%),
+    radial-gradient(circle at 75% 80%, var(--accent-soft), transparent 50%),
     radial-gradient(circle at 25% 15%, var(--accent-soft), transparent 50%),
     var(--bg);
 }

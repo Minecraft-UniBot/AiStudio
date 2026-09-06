@@ -693,13 +693,13 @@ onUnmounted(() => {
 .workspace-banner.danger {
   color: var(--danger);
   background: var(--danger-soft);
-  border-bottom: 1px solid #fecaca;
+  border-bottom: 1px solid var(--border-danger);
 }
 
 .workspace-banner.warning {
   color: var(--warning);
   background: var(--warning-soft);
-  border-bottom: 1px solid #fde68a;
+  border-bottom: 1px solid var(--border-warning);
 }
 
 .workspace-banner.warning .spin {
@@ -918,13 +918,13 @@ onUnmounted(() => {
 .status-box.success {
   color: var(--success);
   background: var(--success-soft);
-  border-color: #bbf7d0;
+  border-color: var(--border-success);
 }
 
 .status-box.danger {
   color: var(--danger);
   background: var(--danger-soft);
-  border-color: #fecaca;
+  border-color: var(--border-danger);
 }
 
 /* 手机端单栏（Plan 3.2） */

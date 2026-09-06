@@ -18,6 +18,7 @@
  * 每步完成后更新草稿元数据并通过 market.updated 事件广播（前端实时展示进度）。
  */
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -28,12 +29,13 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { config, saveConfig } from '../core/config';
 import { logger } from '../core/logger';
 import { broadcast } from '../opencode/events';
 import { computeRevision, draftWorkspace, readDraft, updateDraft } from './drafts';
-import { runProcess } from './unibot_env';
+import { downloadFile, runProcess } from './unibot_env';
 import {
   UNIFIED_TEMPLATE_ID,
   copyTemplateRepoExtras,
@@ -170,9 +172,33 @@ function ghEnv(): Record<string, string> {
   return env;
 }
 
+/** gh 可执行文件名（Windows 带 .exe 后缀） */
+function ghBinName(): string {
+  return process.platform === 'win32' ? 'gh.exe' : 'gh';
+}
+
+/** installGhCli 的安装目录（~/.local/share/gh-cli/bin） */
+function ghInstallDir(): string {
+  return join(homedir(), '.local', 'share', 'gh-cli', 'bin');
+}
+
+/** 已安装的 gh 可执行文件绝对路径（installGhCli 安装到 ghInstallDir()） */
+function ghInstallBinPath(): string {
+  return join(ghInstallDir(), ghBinName());
+}
+
+/**
+ * 解析 gh 可执行文件路径：优先用 installGhCli 安装的绝对路径（即使不在 PATH 中也能用），
+ * 否则回退到 PATH 中的 'gh'。
+ */
+function ghBinPath(): string {
+  const installed = ghInstallBinPath();
+  return existsSync(installed) ? installed : 'gh';
+}
+
 /** 运行 gh 命令（输出合并 stdout/stderr；code !== 0 表示失败） */
 function gh(args: string[], options: { cwd?: string; timeout_ms?: number } = {}) {
-  return runProcess('gh', args, { cwd: options.cwd, timeout_ms: options.timeout_ms, env: ghEnv() });
+  return runProcess(ghBinPath(), args, { cwd: options.cwd, timeout_ms: options.timeout_ms, env: ghEnv() });
 }
 
 /** git push 的鉴权参数：token 模式通过 http.extraHeader 注入（不把 token 写进 remote URL/磁盘） */
@@ -271,10 +297,11 @@ export async function getMarketStatus(): Promise<MarketStatus> {
   const gitEmail = await runProcess('git', ['config', '--get', 'user.email'], { env: ghEnv() });
   const gitConfigured = gitName.code === 0 && gitEmail.code === 0;
 
-  const ghProbe = await runProcess('gh', ['--version'], { env: ghEnv() });
+  // 用 ghBinPath() 探测：installGhCli 安装的绝对路径即使不在 PATH 中也能识别为可用
+  const ghProbe = await runProcess(ghBinPath(), ['--version'], { env: ghEnv() });
   const ghAvailable = ghProbe.code === 0;
   const ghAuth = ghAvailable
-    ? await runProcess('gh', ['auth', 'status'], { env: ghEnv() })
+    ? await runProcess(ghBinPath(), ['auth', 'status'], { env: ghEnv() })
     : { code: 1, output: '' };
   const ghAuthed = ghAuth.code === 0;
 
@@ -701,5 +728,267 @@ async function cleanupWorkDirs(): Promise<void> {
     }
   } catch {
     // 清理失败不影响主流程
+  }
+}
+
+// ===== GitHub CLI 安装（gh 未安装时从 cli/cli releases 拉取当前系统安装包） =====
+
+export interface GhInstallInfo {
+  /** 当前系统平台（darwin/linux/win32） */
+  platform: string;
+  /** 当前系统架构（x64/arm64） */
+  arch: string;
+  /** 匹配的资产文件名（未找到为 null） */
+  asset_name: string | null;
+  /** 资产下载地址 */
+  download_url: string | null;
+  /** 最新版本号（如 2.62.0） */
+  version: string | null;
+  /** 安装目标目录（gh 可执行文件所在目录） */
+  install_dir: string;
+  /** 安装后的 gh 可执行文件绝对路径 */
+  bin_path: string;
+  /** 安装目录是否已加入 PATH（未加入时前端提示用户手动加入） */
+  in_path: boolean;
+}
+
+/** gh CLI 资产命名中的平台段（gh_<ver>_<os>_<arch>.<ext>） */
+function ghAssetPlatform(platform: NodeJS.Platform): string {
+  switch (platform) {
+    case 'darwin':
+      return 'macOS';
+    case 'win32':
+      return 'windows';
+    default:
+      return 'linux';
+  }
+}
+
+/** gh CLI 资产命名中的架构段（amd64/arm64） */
+function ghAssetArch(arch: string): string {
+  switch (arch) {
+    case 'x64':
+      return 'amd64';
+    case 'arm64':
+      return 'arm64';
+    default:
+      return arch;
+  }
+}
+
+/** 检测当前系统对应的 gh CLI 安装信息（从 cli/cli 最新 release 匹配资产） */
+export async function getGhInstallInfo(): Promise<GhInstallInfo> {
+  const platform = ghAssetPlatform(process.platform);
+  const arch = ghAssetArch(process.arch);
+  const installDir = ghInstallDir();
+  const binPath = ghInstallBinPath();
+  // PATH 分隔符跨平台（POSIX ':' / Windows ';'），用 path.delimiter 判断安装目录是否已加入 PATH
+  const inPath = process.env.PATH?.split(delimiter).some((p) => resolve(p) === installDir) ?? false;
+
+  const info: GhInstallInfo = {
+    platform,
+    arch,
+    asset_name: null,
+    download_url: null,
+    version: null,
+    install_dir: installDir,
+    bin_path: binPath,
+    in_path: inPath,
+  };
+
+  try {
+    const response = await fetch('https://api.github.com/repos/cli/cli/releases/latest', {
+      headers: { 'User-Agent': 'unibot-extension-studio', Accept: 'application/vnd.github+json' },
+    });
+    if (!response.ok) return info;
+    const data = (await response.json()) as {
+      tag_name?: string;
+      assets?: Array<{ name?: string; browser_download_url?: string }>;
+    };
+    info.version = (data.tag_name ?? '').replace(/^v/, '') || null;
+    // 优先 zip/tar.gz 便携包（macOS 的 .pkg 需 sudo 安装，不采用）；按平台+架构精确匹配
+    const asset = (data.assets ?? []).find((item) => {
+      const name = item.name ?? '';
+      if (!name.includes(`_${platform}_${arch}`)) return false;
+      return name.endsWith('.zip') || name.endsWith('.tar.gz');
+    });
+    if (asset?.name && asset.browser_download_url) {
+      info.asset_name = asset.name;
+      info.download_url = asset.browser_download_url;
+    }
+  } catch {
+    // API 受限（限流/离线）：保持 asset 为 null，由前端提示稍后重试
+  }
+  return info;
+}
+
+/**
+ * 安装 GitHub CLI（gh）：从 cli/cli 最新 release 拉取当前系统的便携安装包，
+ * 解压后把 gh 可执行文件放到用户目录（~/.local/share/gh-cli/bin），无需 sudo。
+ * 返回安装结果；安装目录未在 PATH 中时前端提示用户手动加入。
+ */
+export async function installGhCli(): Promise<GhInstallInfo> {
+  const info = await getGhInstallInfo();
+  if (!info.download_url || !info.asset_name) {
+    throw new MarketError(
+      `未找到当前系统（${info.platform}/${info.arch}）对应的 gh 安装包，请稍后重试或手动安装`,
+      'GH_ASSET_NOT_FOUND',
+    );
+  }
+  // 已安装则直接返回（幂等）
+  if (existsSync(info.bin_path)) {
+    return info;
+  }
+
+  const staging = join(config.data_dir, '.gh-install');
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  try {
+    logger.info('market', '开始安装 GitHub CLI', {
+      version: info.version,
+      asset: info.asset_name,
+      platform: info.platform,
+      arch: info.arch,
+    });
+    const archive = join(staging, info.asset_name);
+    await downloadFile(info.download_url, archive);
+
+    // 解压到 staging（zip 用 unzip，tar.gz 用 tar）
+    const extractDir = join(staging, 'extracted');
+    mkdirSync(extractDir, { recursive: true });
+    const isZip = info.asset_name.endsWith('.zip');
+    const extract = isZip
+      ? await runProcess('unzip', ['-q', '-o', archive, '-d', extractDir])
+      : await runProcess('tar', ['-xzf', archive, '-C', extractDir]);
+    if (extract.code !== 0) {
+      throw new Error(`解压失败：${extract.output.slice(-400)}`);
+    }
+
+    // 在解压目录中定位 gh 可执行文件（zip/tar 顶层带 gh_<ver>_<os>_<arch>/ 目录）
+    const sourceBin = findGhBinary(extractDir);
+    if (!sourceBin) throw new Error('解压内容中未找到 gh 可执行文件');
+
+    // 复制到安装目录并赋予执行权限
+    mkdirSync(info.install_dir, { recursive: true });
+    const target = info.bin_path;
+    writeFileSync(target, readFileSync(sourceBin));
+    if (process.platform !== 'win32') {
+      await runProcess('chmod', ['+x', target]);
+    }
+    logger.info('market', 'GitHub CLI 安装完成', {
+      version: info.version,
+      bin_path: target,
+      in_path: info.in_path,
+    });
+    return info;
+  } catch (e) {
+    rmSync(staging, { recursive: true, force: true });
+    throw new MarketError(`安装 GitHub CLI 失败：${(e as Error).message}`, 'GH_INSTALL_FAILED');
+  }
+}
+
+/** 在解压目录中递归定位 gh 可执行文件（zip/tar 顶层带 gh_<ver>_<os>_<arch>/ 目录） */
+function findGhBinary(dir: string): string | null {
+  const binName = ghBinName();
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (existsSync(full) && statSync(full).isDirectory()) {
+      const found = findGhBinary(full);
+      if (found) return found;
+    } else if (entry === binName) {
+      return full;
+    }
+  }
+  return null;
+}
+
+// ===== GitHub 登录（后台执行 gh auth login --web，前端展示 one-time code + URL） =====
+
+export interface GhLoginInfo {
+  /** 一次性验证码（用户在浏览器输入） */
+  code: string;
+  /** 浏览器授权地址 */
+  url: string;
+  /** 登录进程是否仍在等待授权完成 */
+  pending: boolean;
+}
+
+/** 当前正在进行的 gh 登录子进程（同一时刻只允许一个） */
+let activeLogin: { child: ReturnType<typeof spawn>; timer: ReturnType<typeof setTimeout> } | null = null;
+
+/**
+ * 后台启动 GitHub 登录：执行 `gh auth login --web`，捕获 one-time code 与授权 URL
+ * 返回给前端展示，子进程保持运行等待用户在浏览器完成授权。
+ * 前端展示 code + URL 后，用户打开 URL 输入 code 即完成登录；前端轮询 /market 检测登录态。
+ */
+export async function startGhLogin(): Promise<GhLoginInfo> {
+  // 已登录则直接返回（幂等）
+  const status = await getMarketStatus();
+  if (status.gh_authed) {
+    throw new MarketError('GitHub 已登录，无需重复登录', 'GH_ALREADY_AUTHED');
+  }
+  // 已有进行中的登录进程：返回其状态（避免重复启动）
+  if (activeLogin) {
+    return { code: '', url: '', pending: true };
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(ghBinPath(), ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', 'github.com'], {
+      env: { ...process.env, ...ghEnv() },
+    });
+    let output = '';
+    let settled = false;
+    const finish = (info: GhLoginInfo) => {
+      if (settled) return;
+      settled = true;
+      resolve(info);
+    };
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      reject(new MarketError(message, 'GH_LOGIN_FAILED'));
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      // 解析 one-time code（格式：XXXX-XXXX）与授权 URL
+      const codeMatch = output.match(/one-time code:\s*([A-Z0-9-]{4,})/i);
+      const urlMatch = output.match(/https:\/\/github\.com\/login\/device/i);
+      if (codeMatch && urlMatch) {
+        finish({ code: codeMatch[1]!, url: urlMatch[0], pending: true });
+      }
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.on('error', (error) => {
+      fail(`启动 gh 登录失败：${error.message}`);
+    });
+    child.on('close', (code) => {
+      // 进程提前退出（未捕获到 code/URL 或授权完成）：清理活动记录
+      if (activeLogin) {
+        clearTimeout(activeLogin.timer);
+        activeLogin = null;
+      }
+      if (!settled) {
+        fail(`gh 登录进程提前退出（code ${code ?? '?'}）：${output.slice(-300)}`);
+      }
+    });
+
+    // 记录活动进程；60s 内未捕获到 code/URL 视为失败
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      fail('gh 登录超时：未能获取一次性验证码，请重试');
+    }, 60_000);
+    activeLogin = { child, timer };
+  });
+}
+
+/** 取消进行中的 gh 登录进程（前端关闭弹窗/放弃登录时调用） */
+export function cancelGhLogin(): void {
+  if (activeLogin) {
+    clearTimeout(activeLogin.timer);
+    activeLogin.child.kill('SIGKILL');
+    activeLogin = null;
   }
 }

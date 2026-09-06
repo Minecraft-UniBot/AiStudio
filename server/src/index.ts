@@ -34,7 +34,7 @@ import {
   updateDraftVersion,
 } from './studio/drafts';
 import { publishDraft, PublishError } from './studio/publishing';
-import { getMarketStatus, saveMarketConfig, startMarketPublish, MarketError } from './studio/market';
+import { getMarketStatus, saveMarketConfig, startMarketPublish, installGhCli, startGhLogin, cancelGhLogin, MarketError } from './studio/market';
 import { broadcast, registerSocket, startEventConsumer, unregisterSocket, toPermissionRequest } from './opencode/events';
 import { getTools, updateTools } from './ai/tools';
 import { activatePrompt, getPrompt, listPrompts, renderPromptWithSecurity, savePrompt } from './ai/prompts';
@@ -1100,6 +1100,32 @@ async function handleRequest(req: Request): Promise<Response> {
         return errorJson(`保存市场配置失败：${(e as Error).message}`);
       }
     }
+  }
+  // 安装 GitHub CLI（gh 未安装时从 cli/cli releases 拉取当前系统安装包）
+  if (path === '/api/studio/market/install-gh' && req.method === 'POST') {
+    assertFeatureEnabled('market_publish');
+    try {
+      return json(await installGhCli());
+    } catch (e) {
+      if (e instanceof MarketError) return errorJson(e.message, 1, 400);
+      return errorJson(`安装 GitHub CLI 失败：${(e as Error).message}`);
+    }
+  }
+  // 后台启动 GitHub 登录（gh auth login --web，返回 one-time code + URL 供前端展示）
+  if (path === '/api/studio/market/gh-login' && req.method === 'POST') {
+    assertFeatureEnabled('market_publish');
+    try {
+      return json(await startGhLogin());
+    } catch (e) {
+      if (e instanceof MarketError) return errorJson(e.message, 1, 400);
+      return errorJson(`启动 GitHub 登录失败：${(e as Error).message}`);
+    }
+  }
+  // 取消进行中的 GitHub 登录进程
+  if (path === '/api/studio/market/gh-login/cancel' && req.method === 'POST') {
+    assertFeatureEnabled('market_publish');
+    cancelGhLogin();
+    return json({ ok: true });
   }
 
   // ---- 工具注册表（持久化到 config/tools.json，Plan 7.2） ----

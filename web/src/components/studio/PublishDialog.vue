@@ -87,16 +87,16 @@ const emit = defineEmits(['confirm'])
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3);
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-info);
   border-radius: var(--radius);
   font-size: var(--text-sm);
-  color: #1e40af;
+  color: var(--accent);
   line-height: 1.5;
 }
 
 .update-banner code {
-  background: #dbeafe;
+  background: var(--accent-soft);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: var(--text-xs);
@@ -179,10 +179,10 @@ const emit = defineEmits(['confirm'])
   margin: 0;
   padding: var(--space-3);
   background: var(--warning-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--border-warning);
   border-radius: var(--radius);
   font-size: var(--text-sm);
-  color: #92400e;
+  color: var(--warning);
   line-height: 1.5;
 }
 

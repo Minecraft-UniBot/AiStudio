@@ -114,10 +114,10 @@ server/src/
 │   ├── publishing.ts   # 原子发布（staging + rename，摘要核对，拒绝覆盖）
 │   ├── test_tools.ts   # 测试工具后端实现（部署/移除/加载/日志/测试，只写测试环境）
 │   ├── templates.ts    # 统一模板（Extension.Example GitHub 拉取缓存 + 示例代码清理 + 仓库级文件）
-│   ├── market.ts       # 插件市场上传（git/gh 命令行：脚手架/提交/建仓/推送/Release/市场 PR）
+│   ├── market.ts       # 插件市场上传（git/gh 命令行：脚手架/提交/建仓/推送/Release/市场 PR）+ gh CLI 一键安装
 │   ├── preview.ts      # 模板预览编排（Jinja2 渲染草稿 Templates → HTML）
 │   ├── mc_server.ts    # 目标 MC 服务器选择/扫描（类型版本插件模组）/上下文渲染
-│   └── unibot_env.ts   # 共享 UniBot 测试环境（GitHub release 下载 + uv venv）+ runProcess
+│   └── unibot_env.ts   # 共享 UniBot 测试环境（GitHub release 下载 + uv venv）+ runProcess + downloadFile（market.ts 复用）
 └── ai/                 # AI 编排
     ├── pipeline.ts     # startCoding：安全约束 + skills + scaffold 提示词
     ├── prompts.ts      # 提示词模板版本化（server/prompts/*.md + versions 存储）
@@ -152,6 +152,8 @@ server/src/
 | POST | `/drafts/:id/abort` · `/revert` · `/check` · `/debug` · `/publish` | 停止/回退/重新校验/AI 修复校验/发布 |
 | POST/GET | `/drafts/:id/market` | 上传插件市场（后台执行）/ 拉取上传运行记录 |
 | GET/PATCH | `/market` | 市场登录态检测与配置（owner/token 脱敏/仓库可见性；token 只能经此接口修改） |
+| POST | `/market/install-gh` | 一键安装 GitHub CLI（从 cli/cli releases 拉取当前系统安装包） |
+| POST | `/market/gh-login` · `/market/gh-login/cancel` | 后台启动 GitHub 登录（gh auth login --web）/ 取消登录 |
 | GET | `/drafts/:id/files`、`/files/content?path=` | 文件树/内容（受限路径） |
 | GET | `/drafts/:id/diff`、`/todo`、`/permissions` | 技术详情/待办/待处理权限兜底 |
 | GET/POST | `/drafts/:id/preview` | 模板预览名列表/渲染 HTML |
@@ -188,9 +190,19 @@ precheck(校验摘要核对) → auth(git 身份 + gh 登录态) → scaffold �
   `<id>-<version>.zip` 上传资产；asset 步骤轮询等待（超时不阻断，市场定时任务稍后抓取）
 - **市场注册**：fork 市场仓库（config.market.market_repo）→ 写入 `extensions/<id>.json`
   元数据 → 推送分支 → 创建/复用 Pull Request
-- **登录引导**：未就绪时 `/market` 返回明确 guidance（安装 gh、终端 `gh auth login`、
-  或平台设置粘贴 GitHub PAT）；ready 判定要求 git 身份 + gh CLI 可用 + 登录态 + owner 解析成功。
+- **登录引导**：未就绪时 `/market` 返回明确 guidance（安装 gh、后台登录、或平台设置粘贴 GitHub PAT）；
+  ready 判定要求 git 身份 + gh CLI 可用 + 登录态 + owner 解析成功。
   owner 可用环境变量 `UNIBOT_MARKET_OWNER` 覆盖；服务重启时中断的 running 记录落盘为 failed
+- **一键安装 gh CLI**：gh 未安装时前端提供「一键安装 GitHub CLI」按钮（`POST /market/install-gh`）。
+  `installGhCli()` 从 `cli/cli` 最新 release 按当前平台/架构（darwin/linux/win32 × amd64/arm64）
+  匹配便携安装包（`.zip`/`.tar.gz`，避开需 sudo 的 macOS `.pkg`），下载解压后把 `gh` 可执行文件
+  放到用户目录 `~/.local/share/gh-cli/bin/`（无需 sudo），幂等（已安装直接返回）。
+  **gh 命令统一走 `ghBinPath()`**：优先用已安装的绝对路径（即使不在 PATH 中也能用），否则回退 PATH 的 `gh`；
+  `getMarketStatus()` 探测同样用该路径，安装后无需手动配置 PATH 即可识别为可用。
+- **后台 GitHub 登录**：gh 已安装但未登录时，前端提供「登录 GitHub」按钮（`POST /market/gh-login`）。
+  `startGhLogin()` 后台执行 `gh auth login --web`，捕获 one-time code 与授权 URL 返回前端展示，
+  子进程保持运行等待用户在浏览器完成授权；前端轮询 `/market` 检测登录态，授权完成后自动刷新。
+  `POST /market/gh-login/cancel` 取消进行中的登录进程；同一时刻仅允许一个登录进程。
 
 ## 六、校验、测试工具与提示词
 

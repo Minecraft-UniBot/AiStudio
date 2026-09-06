@@ -154,6 +154,25 @@ const marketBadge = computed(() => {
     : { label: '未就绪', variant: 'warning' }
 })
 
+/** 安装 GitHub CLI（gh 未安装时从 cli/cli releases 拉取当前系统安装包） */
+const installingGh = ref(false)
+async function installGh() {
+  installingGh.value = true
+  try {
+    const info = await api('/market/install-gh', { method: 'POST' })
+    if (info.in_path) {
+      toast_success(`GitHub CLI 已安装（v${info.version ?? ''}），可重新检测登录态`)
+    } else {
+      toast_success(`GitHub CLI 已安装到 ${info.bin_path}，请将该目录加入 PATH 后重试`)
+    }
+    await loadMarketStatus()
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    installingGh.value = false
+  }
+}
+
 // ---- 外观主题 ----
 const themeOptions = [
   { value: 'light', label: '亮色', icon: 'lucide:sun' },
@@ -450,6 +469,13 @@ onMounted(() => {
           <div v-if="marketStatus && !marketStatus.ready && marketStatus.guidance" class="market-guide">
             <Icon icon="lucide:info" width="14" />
             <pre class="market-guide-text">{{ marketStatus.guidance }}</pre>
+            <!-- gh 未安装：一键从 cli/cli releases 拉取当前系统安装包 -->
+            <div v-if="!marketStatus.gh_available" class="market-guide-actions">
+              <Button size="sm" :loading="installingGh" @click="installGh">
+                <Icon icon="lucide:download" width="13" />
+                {{ installingGh ? '安装中…' : '一键安装 GitHub CLI' }}
+              </Button>
+            </div>
           </div>
 
           <!-- 配置表单 -->
@@ -596,7 +622,7 @@ onMounted(() => {
 
 /* 提供商卡片：紫色顶部指示 */
 .card.provider-card {
-  border-top: 2px solid #8b5cf6;
+  border-top: 2px solid var(--violet);
 }
 
 /* 工具卡片：橙色顶部指示 */
@@ -773,7 +799,7 @@ onMounted(() => {
 
 .provider-empty.danger {
   color: var(--danger);
-  border-color: #fecaca;
+  border-color: var(--border-danger);
   background: var(--danger-soft);
 }
 
@@ -815,10 +841,10 @@ onMounted(() => {
   padding: var(--space-2) var(--space-3);
   margin-bottom: var(--space-2);
   background: var(--warning-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--border-warning);
   border-radius: var(--radius);
   font-size: var(--text-sm);
-  color: #92400e;
+  color: var(--warning);
   line-height: 1.5;
 }
 
@@ -862,7 +888,7 @@ onMounted(() => {
   gap: var(--space-2);
   padding: var(--space-3);
   background: var(--warning-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--border-warning);
   border-radius: var(--radius);
 }
 
@@ -875,10 +901,17 @@ onMounted(() => {
 .market-guide-text {
   margin: 0;
   font-size: var(--text-xs);
-  color: #92400e;
+  color: var(--warning);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.market-guide-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .market-form {

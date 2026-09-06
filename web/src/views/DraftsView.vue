@@ -244,7 +244,7 @@ function onUnibotDirSaved() {
   padding: var(--space-3) var(--space-4);
   margin-bottom: var(--space-5);
   background: var(--warning-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid var(--border-warning);
   border-radius: var(--radius-md);
 }
 
@@ -275,7 +275,7 @@ function onUnibotDirSaved() {
 
 .banner-text code {
   padding: 0 4px;
-  background: rgb(255 255 255 / 0.7);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-family: var(--font-mono);

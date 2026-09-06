@@ -472,8 +472,8 @@ function onKeydown(e) {
 }
 
 .question-card {
-  border: 1px solid #c7d7f7;
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 78%);
+  border: 1px solid var(--border-info);
+  background: var(--surface);
   border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);
   display: flex;
@@ -499,7 +499,7 @@ function onKeydown(e) {
   height: 26px;
   border-radius: var(--radius);
   background: var(--accent-soft);
-  border: 1px solid #dbe7fd;
+  border: 1px solid var(--border-info);
   flex-shrink: 0;
   color: var(--accent);
 }

@@ -391,7 +391,7 @@ function todo_priority_class(priority) {
 .checkpoint-revert:hover {
   color: var(--danger);
   background: var(--danger-soft);
-  border-color: #fecaca;
+  border-color: var(--border-danger);
 }
 
 .message {
@@ -473,7 +473,7 @@ function todo_priority_class(priority) {
 
 .revert-btn:hover {
   color: var(--danger);
-  border-color: #fecaca;
+  border-color: var(--border-danger);
   background: var(--danger-soft);
 }
 
@@ -724,7 +724,7 @@ function todo_priority_class(priority) {
 }
 
 .tool-call.fail {
-  border-color: #fecaca;
+  border-color: var(--border-danger);
 }
 
 .tool-head {
@@ -864,7 +864,7 @@ function todo_priority_class(priority) {
 .todo-priority.high {
   color: var(--danger);
   background: var(--danger-soft);
-  border-color: #fecaca;
+  border-color: var(--border-danger);
 }
 
 .todo-priority.low {
@@ -1030,7 +1030,7 @@ function todo_priority_class(priority) {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--danger-soft);
-  border: 1px solid #fecaca;
+  border: 1px solid var(--border-danger);
   border-radius: var(--radius-md);
   color: var(--danger);
   font-size: var(--text-xs);

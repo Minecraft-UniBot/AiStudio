@@ -30,15 +30,8 @@ defineProps({
 }
 
 .empty-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
-  color: var(--border-strong);
+  color: var(--text-muted);
+  opacity: 0.55;
   margin-bottom: var(--space-1);
 }
 

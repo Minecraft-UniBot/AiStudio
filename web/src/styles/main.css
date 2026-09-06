@@ -25,6 +25,14 @@
   --danger: #dc2626;
   --danger-hover: #b91c1c;
   --danger-soft: #fef2f2;
+  --violet: #8b5cf6;
+  --violet-soft: #f5f3ff;
+
+  /* 语义边框（随主题切换） */
+  --border-warning: #fde68a;
+  --border-danger: #fecaca;
+  --border-success: #bbf7d0;
+  --border-info: #bfdbfe;
 
   /* 字体 */
   --font-body:
@@ -87,28 +95,36 @@
 
 /* ---------- 暗色模式 ---------- */
 [data-theme="dark"] {
-  --bg: #0a0a0b;
-  --surface: #18181b;
-  --surface-sunken: #111113;
-  --border: #27272a;
-  --border-strong: #3f3f46;
-  --text: #fafafa;
+  --bg: #0b0b0d;
+  --surface: #161618;
+  --surface-sunken: #101012;
+  --border: #26262a;
+  --border-strong: #3a3a40;
+  --text: #f4f4f5;
   --text-secondary: #d4d4d8;
-  --text-muted: #a1a1aa;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-soft: #1e293b;
-  --success: #22c55e;
-  --success-soft: #052e16;
-  --warning: #f59e0b;
-  --warning-soft: #422006;
-  --danger: #ef4444;
-  --danger-hover: #dc2626;
-  --danger-soft: #450a0a;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.4);
-  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.5);
-  --bg-hover: #27272a;
+  --text-muted: #9d9da6;
+  --accent: #4f8cff;
+  --accent-hover: #3b82f6;
+  --accent-soft: #1a2438;
+  --success: #34d399;
+  --success-soft: #0a2e22;
+  --warning: #fbbf24;
+  --warning-soft: #3a2a08;
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --danger-soft: #3a1212;
+  --violet: #a78bfa;
+  --violet-soft: #2e2440;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.6);
+  --bg-hover: #202024;
+
+  /* 语义边框（暗色） */
+  --border-warning: #5c4a1e;
+  --border-danger: #5c1f1f;
+  --border-success: #14532d;
+  --border-info: #1e3a5f;
 }
 
 /* ---------- Reset ---------- */

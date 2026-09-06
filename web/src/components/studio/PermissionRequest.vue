@@ -67,8 +67,8 @@ function metaText() {
 <style scoped>
 .permission-card {
   position: relative;
-  border: 1px solid #fcd34d;
-  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 72%);
+  border: 1px solid var(--border-warning);
+  background: var(--surface);
   border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);
   display: flex;
@@ -85,7 +85,7 @@ function metaText() {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: linear-gradient(180deg, #f59e0b, #fbbf24);
+  background: var(--warning);
 }
 
 .perm-head {
@@ -102,8 +102,8 @@ function metaText() {
   width: 26px;
   height: 26px;
   border-radius: var(--radius);
-  background: #fef3c7;
-  border: 1px solid #fde68a;
+  background: var(--warning-soft);
+  border: 1px solid var(--border-warning);
   flex-shrink: 0;
 }
 
