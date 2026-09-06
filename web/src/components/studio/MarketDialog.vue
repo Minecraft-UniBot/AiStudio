@@ -91,16 +91,16 @@ async function installGh() {
   }
 }
 
-// ===== GitHub 登录（后台执行 gh auth login --web） =====
+// ===== GitHub 登录（后台 gh device flow） =====
 
-/** 登录进行中 / 已获取 one-time code */
+/** 登录请求进行中 */
 const loggingIn = ref(false)
 /** 后端返回的登录信息（code + url） */
 const loginInfo = ref(null)
-/** 登录状态轮询定时器 */
+/** 登录态轮询定时器 */
 let loginPollTimer = null
 
-/** 一键登录：后端启动 gh auth login --web，返回 one-time code + URL 供展示 */
+/** 一键登录：后端启动 gh device flow，返回 one-time code + URL 供展示 */
 async function startLogin() {
   loggingIn.value = true
   loginInfo.value = null
@@ -109,7 +109,6 @@ async function startLogin() {
     if (info.pending && info.code) {
       loginInfo.value = info
       toast_success('已生成登录验证码，请在浏览器完成授权')
-      // 轮询检测登录态（授权完成后自动刷新）
       startLoginPolling()
     } else {
       toast_success('GitHub 已登录')
@@ -122,7 +121,7 @@ async function startLogin() {
   }
 }
 
-/** 轮询登录态：授权完成后停止轮询并刷新状态 */
+/** 轮询登录态：gh 授权完成后刷新，自动关闭验证码面板 */
 function startLoginPolling() {
   stopLoginPolling()
   loginPollTimer = setInterval(async () => {
@@ -142,7 +141,7 @@ function stopLoginPolling() {
   }
 }
 
-/** 取消登录（关闭弹窗/放弃时调用） */
+/** 取消登录（放弃授权时调用） */
 async function cancelLogin() {
   stopLoginPolling()
   loginInfo.value = null
@@ -210,147 +209,232 @@ const resultLinks = computed(() => {
 <template>
   <Dialog
     v-model="open"
-    title="上传到插件市场"
-    description="按 Extension.Example 模板生成扩展仓库 → 推送到 GitHub → 创建 Release → 向市场提交注册 PR"
+    title="发布到插件市场"
+    description="在 GitHub 生成扩展仓库并推送，创建 Release 打包后向 UniBot 市场提交注册"
     :hide-footer="true"
-    width="min(560px, calc(100vw - 32px))"
+    width="min(620px, calc(100vw - 32px))"
   >
-    <!-- 登录状态 -->
-    <section class="auth-card">
-      <div class="auth-head">
-        <div class="auth-head-left">
-          <span class="auth-icon"><Icon icon="lucide:github" width="16" /></span>
-          <span class="auth-title">GitHub 登录状态</span>
+    <!-- 流程指示条 -->
+    <div v-if="!run || run.status !== 'running'" class="flow-steps">
+      <div class="flow-step" :class="{ active: needsSetup }">
+        <span class="flow-dot" :class="{ ok: !needsSetup && store.marketStatus?.ready }">
+          <Icon v-if="!needsSetup && store.marketStatus?.ready" icon="lucide:check" width="11" />
+          <template v-else>1</template>
+        </span>
+        <span class="flow-label">就绪检查</span>
+      </div>
+      <span class="flow-connector" :class="{ on: !needsSetup && store.marketStatus?.ready }" />
+      <div class="flow-step" :class="{ active: !needsSetup && !run }">
+        <span class="flow-dot" :class="{ ok: !needsSetup && !run }">
+          <Icon v-if="!needsSetup && !run" icon="lucide:check" width="11" />
+          <template v-else>2</template>
+        </span>
+        <span class="flow-label">推送仓库</span>
+      </div>
+      <span class="flow-connector" />
+      <div class="flow-step">
+        <span class="flow-dot">3</span>
+        <span class="flow-label">提交注册</span>
+      </div>
+    </div>
+
+    <!-- 未就绪：登录与准备引导 -->
+    <section v-if="needsSetup" class="panel">
+      <div class="panel-head">
+        <span class="head-icon"><Icon icon="lucide:github" width="16" /></span>
+        <div class="head-text">
+          <span class="head-title">GitHub 就绪检查</span>
+          <span class="head-sub">完成以下步骤即可发布扩展</span>
         </div>
-        <Badge :variant="statusBadge.variant">{{ statusBadge.label }}</Badge>
       </div>
 
-      <div class="auth-rows">
-        <div v-for="row in authRows" :key="row.label" class="auth-row">
-          <span class="auth-status-icon" :class="row.ok ? 'ok' : 'no'">
-            <Icon :icon="row.ok ? 'lucide:check' : 'lucide:x'" width="12" />
+      <div class="check-list">
+        <div v-for="row in authRows" :key="row.label" class="check-item">
+          <span class="check-dot" :class="row.ok ? 'ok' : 'no'">
+            <Icon :icon="row.ok ? 'lucide:check' : 'lucide:alert-circle'" width="12" />
           </span>
-          <span class="auth-label">{{ row.label }}</span>
-          <span class="auth-note">{{ row.note }}</span>
+          <div class="check-text">
+            <span class="check-label">{{ row.label }}</span>
+            <span class="check-note">{{ row.note }}</span>
+          </div>
         </div>
       </div>
 
-      <!-- 未就绪：登录引导 -->
-      <div v-if="needsSetup" class="guidance">
-        <p class="guidance-title">
-          <Icon icon="lucide:info" width="14" />
-          需要先完成 GitHub 登录：
-        </p>
-
-        <!-- gh 未安装：一键安装 -->
-        <div v-if="!store.marketStatus?.gh_available" class="guidance-block">
-          <p class="guidance-desc">未检测到 GitHub CLI（gh），点击下方按钮自动下载并安装当前系统的安装包。</p>
-          <Button size="sm" :loading="installingGh" @click="installGh">
+      <!-- gh 未安装：引导安装 -->
+      <div v-if="!store.marketStatus?.gh_available" class="action-box">
+        <div class="action-body">
+          <Icon icon="lucide:terminal" width="16" class="action-lead" />
+          <div class="action-text">
+            <span class="action-title">需要安装 GitHub CLI</span>
+            <span class="action-desc">自动下载并安装匹配当前系统的 gh，无需在终端操作。</span>
+          </div>
+        </div>
+        <div class="action-ctrl">
+          <Button size="sm" variant="secondary" :loading="installingGh" @click="installGh">
             <Icon icon="lucide:download" width="13" />
-            {{ installingGh ? '安装中…' : '一键安装 GitHub CLI' }}
+            {{ installingGh ? '安装中…' : '自动安装' }}
           </Button>
         </div>
+      </div>
 
-        <!-- gh 已安装但未登录：一键登录 -->
-        <div v-else-if="!store.marketStatus?.gh_authed" class="guidance-block">
-          <p class="guidance-desc">点击「登录 GitHub」生成一次性验证码，在浏览器中打开授权地址并输入验证码即可完成登录。</p>
+      <!-- 已装 gh 但未登录（且未配 token）：一键登录 -->
+      <div v-else-if="!store.marketStatus?.gh_authed && !store.marketStatus?.token_configured" class="action-box">
+        <div class="action-body">
+          <Icon icon="lucide:log-in" width="16" class="action-lead" />
+          <div class="action-text">
+            <span class="action-title">登录 GitHub 账号</span>
+            <span class="action-desc">后台启动 gh 登录，生成一次性验证码后在浏览器完成授权即可，无需敲命令。</span>
+          </div>
+        </div>
+        <div class="action-ctrl">
           <Button size="sm" variant="primary" :loading="loggingIn" @click="startLogin">
-            <Icon icon="lucide:log-in" width="13" />
-            {{ loggingIn ? '生成验证码中…' : '登录 GitHub' }}
+            <Icon icon="lucide:github" width="13" />
+            {{ loggingIn ? '生成中…' : '登录 GitHub' }}
           </Button>
         </div>
+      </div>
 
-        <!-- 其他未就绪原因（git 身份缺失等）：展示指引 -->
-        <pre v-else class="guidance-cmd">{{ store.marketStatus?.guidance }}</pre>
-
-        <!-- 登录验证码展示 -->
-        <div v-if="loginInfo" class="login-code">
-          <div class="login-code-head">
-            <Icon icon="lucide:key-round" width="14" />
-            <span>在浏览器中完成授权</span>
-          </div>
-          <ol class="login-steps">
-            <li>复制下方一次性验证码</li>
-            <li>
-              打开授权地址
-              <a :href="loginInfo.url" target="_blank" rel="noopener">{{ loginInfo.url }}</a>
-            </li>
-            <li>粘贴验证码并确认授权，完成后自动检测登录态</li>
-          </ol>
-          <div class="login-code-value">
-            <code>{{ loginInfo.code }}</code>
-            <Button size="sm" variant="ghost" @click="copyLoginCode">
-              <Icon icon="lucide:copy" width="13" /> 复制
-            </Button>
-          </div>
-          <div class="login-code-actions">
-            <Button size="sm" variant="ghost" @click="cancelLogin">
-              <Icon icon="lucide:x" width="13" /> 取消登录
-            </Button>
+      <!-- 其余未就绪（已配 token 但缺 owner/git 等，或需 token 兜底）：展示指引 -->
+      <div v-else class="action-box">
+        <div class="action-body">
+          <Icon icon="lucide:info" width="16" class="action-lead" />
+          <div class="action-text">
+            <span class="action-title">还需完成一些配置</span>
+            <span class="action-desc">{{ store.marketStatus?.guidance }}</span>
           </div>
         </div>
-
-        <div class="guidance-actions">
+        <div class="action-ctrl">
           <Button size="sm" variant="ghost" @click="router.push('/admin')">
-            <Icon icon="lucide:settings" width="13" /> 去设置粘贴 Token
+            去设置
           </Button>
         </div>
       </div>
     </section>
 
-    <!-- 未开始：开始上传 -->
-    <section v-if="!run || (run.status !== 'running' && run.status !== 'submitted')" class="start-card">
-      <div class="start-icon"><Icon icon="lucide:store" width="18" /></div>
-      <p class="start-hint">
-        将把校验通过的扩展按官方模板生成仓库并发布到插件市场；Release 资产由仓库内置的打包工作流生成。
-      </p>
+    <!-- 授权验证码（登录进行中展示） -->
+    <section v-if="loginInfo" class="panel auth-flow">
+      <div class="panel-head">
+        <span class="head-icon accent"><Icon icon="lucide:key-round" width="16" /></span>
+        <div class="head-text">
+          <span class="head-title">在浏览器完成授权</span>
+          <span class="head-sub">本窗口会等待授权完成，完成后自动继续</span>
+        </div>
+      </div>
+
+      <ol class="login-steps">
+        <li>
+          <span class="step-no">1</span>
+          <span>复制下方一次性验证码</span>
+        </li>
+        <li>
+          <span class="step-no">2</span>
+          <span>
+            打开
+            <a :href="loginInfo.url" target="_blank" rel="noopener">GitHub 授权页</a>
+            并粘贴验证码
+          </span>
+        </li>
+        <li>
+          <span class="step-no">3</span>
+          <span>确认授权，本窗口将自动检测到登录成功</span>
+        </li>
+      </ol>
+
+      <div class="code-row">
+        <span class="code-box">{{ loginInfo.code }}</span>
+        <Button size="sm" variant="secondary" @click="copyLoginCode">
+          <Icon icon="lucide:copy" width="13" /> 复制
+        </Button>
+        <a :href="loginInfo.url" target="_blank" rel="noopener">
+          <Button size="sm" variant="primary">
+            <Icon icon="lucide:external-link" width="13" /> 打开授权页
+          </Button>
+        </a>
+      </div>
+
+      <div class="auth-flow-foot">
+        <Button size="sm" variant="ghost" @click="cancelLogin">取消登录</Button>
+      </div>
+    </section>
+
+    <!-- 就绪：开始上传 -->
+    <section v-if="!needsSetup && !run" class="panel upload-cta">
+      <div class="upload-visual">
+        <Icon icon="lucide:package-open" width="22" />
+      </div>
+      <div class="upload-copy">
+        <span class="upload-title">一切就绪，开始发布</span>
+        <span class="upload-sub">
+          将按官方模板生成仓库并推送到
+          <b>github.com/{{ store.marketStatus?.owner }}</b>
+          ，随后创建 Release 并向 UniBot 市场提交注册。
+        </span>
+      </div>
       <Button
         variant="primary"
-        class="start-btn"
-        :disabled="!store.marketStatus?.ready || starting"
+        class="upload-btn"
+        :disabled="starting"
         :loading="starting"
         @click="startUpload"
       >
-        <Icon v-if="!starting" icon="lucide:rocket" width="15" />
+        <Icon v-if="!starting" icon="lucide:send" width="14" />
         {{ starting ? '启动中…' : '开始上传' }}
       </Button>
     </section>
 
     <!-- 进行中 / 已完成 / 失败：步骤进度 -->
-    <section v-if="run" class="run-card">
+    <section v-if="run" class="panel">
       <div class="run-head">
-        <span class="run-title">
-          {{ running ? '正在上传…' : run.status === 'submitted' ? '上传提交成功' : '上传失败' }}
-        </span>
-        <Badge v-if="run.status === 'submitted'" variant="success">已提交</Badge>
+        <div class="head-left">
+          <span class="head-icon" :class="run.status">
+            <Icon
+              :icon="running ? 'lucide:loader-2' : run.status === 'submitted' ? 'lucide:check' : 'lucide:x'"
+              width="16"
+              :class="{ spin: running }"
+            />
+          </span>
+          <div class="head-text">
+            <span class="head-title">
+              {{ running ? '正在发布到插件市场…' : run.status === 'submitted' ? '发布成功' : '发布失败' }}
+            </span>
+            <span v-if="run.version" class="head-sub">{{ props.draft?.name }} · v{{ run.version }}</span>
+          </div>
+        </div>
+        <Badge v-if="run.status === 'submitted'" variant="success">已完成</Badge>
         <Badge v-else-if="run.status === 'failed'" variant="danger">失败</Badge>
         <Badge v-else variant="accent">进行中</Badge>
       </div>
 
       <ol class="step-list">
         <li
-          v-for="step in run.steps"
+          v-for="(step, index) in run.steps"
           :key="step.id"
           class="step-item"
           :class="stepVisual(step.status).cls"
         >
-          <span class="step-icon" :class="stepVisual(step.status).cls">
-            <Icon
-              :icon="stepVisual(step.status).icon"
-              width="15"
-              :class="{ spin: step.status === 'running' }"
-            />
+          <span class="step-rail">
+            <span class="step-icon" :class="stepVisual(step.status).cls">
+              <Icon
+                :icon="stepVisual(step.status).icon"
+                width="14"
+                :class="{ spin: step.status === 'running' }"
+              />
+            </span>
+            <span v-if="index < run.steps.length - 1" class="step-line" :class="{ on: step.status === 'passed' }" />
           </span>
           <div class="step-main">
             <span class="step-name">{{ step.name }}</span>
             <span v-if="step.message" class="step-msg">{{ step.message }}</span>
           </div>
+          <span v-if="step.status === 'failed'" class="step-status">
+            <Icon icon="lucide:alert-circle" width="14" />
+          </span>
         </li>
       </ol>
 
       <p v-if="run.error" class="run-error">
         <Icon icon="lucide:triangle-alert" width="14" />
-        {{ run.error }}
+        <span>{{ run.error }}</span>
       </p>
 
       <!-- 结果链接 -->
@@ -364,13 +448,12 @@ const resultLinks = computed(() => {
       <div class="run-actions">
         <Button variant="ghost" size="sm" @click="open = false">关闭</Button>
         <Button
-          v-if="!running"
+          v-if="!running && store.marketStatus?.ready"
           variant="secondary"
           size="sm"
-          :disabled="!store.marketStatus?.ready"
           @click="startUpload"
         >
-          重新上传
+          <Icon icon="lucide:rotate-ccw" width="13" /> 重新上传
         </Button>
       </div>
     </section>
@@ -378,186 +461,290 @@ const resultLinks = computed(() => {
 </template>
 
 <style scoped>
-.auth-card,
-.start-card,
-.run-card {
+/* 面板容器：同一内容骨架，按阶段切换内部卡片 */
+.panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
+  padding: var(--space-5);
   background: var(--surface);
 }
 
-/* ---- 登录状态 ---- */
-.auth-head {
+/* ---- 流程指示条 ---- */
+.flow-steps {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
   gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
 }
 
-.auth-head-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.auth-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.auth-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text);
-}
-
-.auth-rows {
+.flow-step {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-}
-
-.auth-row {
-  display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 0 0 auto;
 }
 
-.auth-status-icon {
+.flow-dot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  flex-shrink: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
 }
 
-.auth-status-icon.ok {
+.flow-step.active .flow-dot {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.flow-step .flow-dot.ok {
+  border-color: transparent;
   background: var(--success-soft);
   color: var(--success);
 }
 
-.auth-status-icon.no {
+.flow-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.flow-step.active .flow-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.flow-connector {
+  flex: 1;
+  height: 1px;
+  align-self: flex-start;
+  margin-top: 11px;
+  background: var(--border);
+  transition: background var(--transition);
+}
+
+.flow-connector.on {
+  background: var(--success);
+}
+
+/* ---- 面板头部 ---- */
+.panel-head,
+.run-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.run-head {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.head-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.head-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.head-icon.accent {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.head-icon.submitted {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.head-icon.failed {
   background: var(--danger-soft);
   color: var(--danger);
 }
 
-.auth-label {
-  color: var(--text-secondary);
+.head-icon.running {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.head-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.head-sub {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ---- 就绪检查清单 ---- */
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+}
+
+.check-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 
-.auth-note {
-  color: var(--text-muted);
+.check-dot.ok {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.check-dot.no {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.check-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.check-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.check-note {
   font-size: var(--text-xs);
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ---- 登录引导 ---- */
-.guidance {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--warning-soft);
-  border: 1px solid var(--border-warning);
-  border-radius: var(--radius);
-}
-
-.guidance-title {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-1);
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--warning);
-  line-height: 1.5;
-}
-
-.guidance-title svg {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.guidance-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-
-.guidance-desc {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.guidance-cmd {
-  margin: 0;
-  padding: var(--space-3);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: var(--text-xs);
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.guidance-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
-/* ---- 登录验证码 ---- */
-.login-code {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.login-code-head {
+/* ---- 就绪引导操作块 ---- */
+.action-box {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--accent-soft);
+  border: 1px solid rgb(37 99 235 / 0.14);
+  border-radius: var(--radius-md);
+}
+
+.action-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.action-lead {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.action-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.action-title {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text);
 }
 
-.login-code-head svg {
-  color: var(--accent);
+.action-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.6;
+  min-width: 0;
+}
+
+.action-ctrl {
+  flex-shrink: 0;
+}
+
+/* ---- 授权验证码面板 ---- */
+.auth-flow {
+  border-color: rgb(22 163 74 / 0.2);
+}
+
+.auth-flow .panel-head {
+  align-items: center;
 }
 
 .login-steps {
   margin: 0;
-  padding-left: var(--space-4);
+  padding: var(--space-2) var(--space-5) var(--space-1);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--text-xs);
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.login-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.6;
 }
@@ -565,99 +752,125 @@ const resultLinks = computed(() => {
 .login-steps a {
   color: var(--accent);
   text-decoration: none;
-  word-break: break-all;
+  font-weight: 500;
 }
 
 .login-steps a:hover {
   text-decoration: underline;
 }
 
-.login-code-value {
+.step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.code-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex-wrap: wrap;
 }
 
-.login-code-value code {
-  font-size: var(--text-base);
+.code-box {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.18em;
   color: var(--accent);
+  text-align: center;
   user-select: all;
+  min-width: 0;
 }
 
-.login-code-actions {
+.code-row a {
+  text-decoration: none;
+  display: inline-flex;
+}
+
+.auth-flow-foot {
   display: flex;
   justify-content: flex-end;
 }
 
-/* ---- 开始上传 ---- */
-.start-card {
-  align-items: center;
-  text-align: center;
+/* ---- 就绪上传 CTA ---- */
+.upload-cta {
+  align-items: flex-start;
+  gap: var(--space-4);
 }
 
-.start-icon {
+.upload-visual {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-lg);
   background: var(--accent-soft);
   color: var(--accent);
+  flex-shrink: 0;
 }
 
-.start-hint {
-  margin: 0;
+.upload-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.upload-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.upload-sub {
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: 1.6;
 }
 
-.start-btn {
-  width: 100%;
-  justify-content: center;
-}
-
-/* ---- 步骤进度 ---- */
-.run-card {
-  gap: var(--space-3);
-}
-
-.run-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.run-title {
-  font-size: var(--text-sm);
+.upload-sub b {
+  color: var(--text-secondary);
   font-weight: 600;
-  color: var(--text);
 }
 
+.upload-btn {
+  align-self: stretch;
+  justify-content: center;
+  height: 40px;
+  font-size: var(--text-sm);
+}
+
+/* ---- 步骤时间线 ---- */
 .step-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
 }
 
 .step-item {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   font-size: var(--text-sm);
   transition: background 150ms ease-out;
 }
@@ -670,6 +883,14 @@ const resultLinks = computed(() => {
   background: var(--danger-soft);
 }
 
+.step-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 22px;
+}
+
 .step-icon {
   display: inline-flex;
   align-items: center;
@@ -677,8 +898,6 @@ const resultLinks = computed(() => {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  flex-shrink: 0;
-  margin-top: 1px;
 }
 
 .step-icon.passed {
@@ -687,8 +906,9 @@ const resultLinks = computed(() => {
 }
 
 .step-icon.running {
-  background: var(--accent-soft);
+  background: var(--surface);
   color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .step-icon.failed {
@@ -698,7 +918,21 @@ const resultLinks = computed(() => {
 
 .step-icon.pending {
   background: var(--bg);
+  border: 1px solid var(--border);
   color: var(--border-strong);
+}
+
+.step-line {
+  width: 2px;
+  flex: 1;
+  min-height: 16px;
+  margin: var(--space-1) 0;
+  background: var(--border);
+  border-radius: 1px;
+}
+
+.step-line.on {
+  background: var(--success);
 }
 
 .step-main {
@@ -706,14 +940,17 @@ const resultLinks = computed(() => {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  padding-top: 2px;
 }
 
 .step-name {
   color: var(--text);
+  font-weight: 500;
 }
 
 .step-item.pending .step-name {
   color: var(--text-muted);
+  font-weight: 400;
 }
 
 .step-msg {
@@ -722,15 +959,23 @@ const resultLinks = computed(() => {
   word-break: break-all;
 }
 
+.step-status {
+  margin-left: auto;
+  color: var(--danger);
+  align-self: flex-start;
+  padding-top: 2px;
+}
+
+/* ---- 错误提示 ---- */
 .run-error {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-1);
+  gap: var(--space-2);
   margin: 0;
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   background: var(--danger-soft);
   border: 1px solid var(--border-danger);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   font-size: var(--text-sm);
   color: var(--danger);
   line-height: 1.5;
@@ -742,34 +987,44 @@ const resultLinks = computed(() => {
   margin-top: 2px;
 }
 
+/* ---- 结果链接 ---- */
 .result-links {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+  padding-top: var(--space-1);
 }
 
 .result-links a {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  height: 30px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   font-size: var(--text-xs);
+  font-weight: 500;
   color: var(--accent);
   text-decoration: none;
   background: var(--surface);
+  transition:
+    border-color var(--transition),
+    background var(--transition);
 }
 
 .result-links a:hover {
   border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
+/* ---- 底部操作 ---- */
 .run-actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
-  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
 }
 
 .spin {

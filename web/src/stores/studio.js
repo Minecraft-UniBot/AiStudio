@@ -318,7 +318,7 @@ export const useStudioStore = defineStore('studio', () => {
     return await api('/market/install-gh', { method: 'POST' })
   }
 
-  /** 后台启动 GitHub 登录（gh auth login --web，返回 one-time code + URL） */
+  /** 后台启动 GitHub 登录（gh device flow，返回 one-time code + URL） */
   async function startGhLogin() {
     return await api('/market/gh-login', { method: 'POST' })
   }

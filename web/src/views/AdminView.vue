@@ -173,6 +173,73 @@ async function installGh() {
   }
 }
 
+// ===== GitHub 登录（后台 gh device flow，与上传弹窗一致） =====
+
+const loggingIn = ref(false)
+const loginInfo = ref(null)
+let loginPollTimer = null
+
+/** 一键登录：后端启动 gh device flow，返回 one-time code + URL */
+async function startLogin() {
+  loggingIn.value = true
+  loginInfo.value = null
+  try {
+    const info = await api('/market/gh-login', { method: 'POST' })
+    if (info.pending && info.code) {
+      loginInfo.value = info
+      toast_success('已生成登录验证码，请在浏览器完成授权')
+      startLoginPolling()
+    } else {
+      toast_success('GitHub 已登录')
+      await loadMarketStatus()
+    }
+  } catch (e) {
+    toast_error(e.message)
+  } finally {
+    loggingIn.value = false
+  }
+}
+
+function startLoginPolling() {
+  stopLoginPolling()
+  loginPollTimer = setInterval(async () => {
+    await loadMarketStatus()
+    if (marketStatus.value?.gh_authed) {
+      stopLoginPolling()
+      loginInfo.value = null
+      toast_success('GitHub 登录成功')
+    }
+  }, 2000)
+}
+
+function stopLoginPolling() {
+  if (loginPollTimer) {
+    clearInterval(loginPollTimer)
+    loginPollTimer = null
+  }
+}
+
+/** 取消登录 */
+async function cancelLogin() {
+  stopLoginPolling()
+  loginInfo.value = null
+  try {
+    await api('/market/gh-login/cancel', { method: 'POST' })
+  } catch {
+    // 取消失败不影响关闭
+  }
+}
+
+/** 复制验证码 */
+async function copyLoginCode() {
+  try {
+    await navigator.clipboard.writeText(loginInfo.value?.code ?? '')
+    toast_success('验证码已复制')
+  } catch {
+    toast_error('复制失败，请手动选择复制')
+  }
+}
+
 // ---- 外观主题 ----
 const themeOptions = [
   { value: 'light', label: '亮色', icon: 'lucide:sun' },
@@ -467,14 +534,43 @@ onMounted(() => {
 
           <!-- 未就绪引导 -->
           <div v-if="marketStatus && !marketStatus.ready && marketStatus.guidance" class="market-guide">
-            <Icon icon="lucide:info" width="14" />
+            <Icon icon="lucide:info" class="icon-info" width="14" />
             <pre class="market-guide-text">{{ marketStatus.guidance }}</pre>
-            <!-- gh 未安装：一键从 cli/cli releases 拉取当前系统安装包 -->
-            <div v-if="!marketStatus.gh_available" class="market-guide-actions">
-              <Button size="sm" :loading="installingGh" @click="installGh">
+            <div class="market-guide-actions">
+              <!-- gh 未安装：一键从 cli/cli releases 拉取当前系统安装包 -->
+              <Button v-if="!marketStatus.gh_available" size="sm" :loading="installingGh" @click="installGh">
                 <Icon icon="lucide:download" width="13" />
                 {{ installingGh ? '安装中…' : '一键安装 GitHub CLI' }}
               </Button>
+              <!-- gh 已装但未登录（且未配 token）：一键登录 -->
+              <Button
+                v-else-if="!marketStatus.gh_authed && !marketStatus.token_configured"
+                size="sm"
+                variant="primary"
+                :loading="loggingIn"
+                @click="startLogin"
+              >
+                <Icon icon="lucide:github" width="13" />
+                {{ loggingIn ? '生成中…' : '登录 GitHub' }}
+              </Button>
+            </div>
+            <!-- 授权验证码 -->
+            <div v-if="loginInfo" class="market-login-code">
+              <span class="market-login-code-label">在浏览器打开授权页并输入验证码：</span>
+              <div class="market-login-code-row">
+                <code class="market-login-code-value">{{ loginInfo.code }}</code>
+                <Button size="sm" variant="ghost" @click="copyLoginCode">
+                  <Icon icon="lucide:copy" width="13" /> 复制
+                </Button>
+                <a :href="loginInfo.url" target="_blank" rel="noopener">
+                  <Button size="sm" variant="primary">
+                    <Icon icon="lucide:external-link" width="13" /> 打开授权页
+                  </Button>
+                </a>
+                <Button size="sm" variant="ghost" @click="cancelLogin">
+                  <Icon icon="lucide:x" width="13" /> 取消
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -884,6 +980,7 @@ onMounted(() => {
 /* ---- 插件市场 ---- */
 .market-guide {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-3);
@@ -892,13 +989,16 @@ onMounted(() => {
   border-radius: var(--radius);
 }
 
-.market-guide svg {
+/* 引导提示图标，紧跟其后为黄色正文 */
+.market-guide > .icon-info {
   flex-shrink: 0;
   margin-top: 2px;
   color: var(--warning);
 }
 
 .market-guide-text {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: var(--text-xs);
   color: var(--warning);
@@ -907,11 +1007,53 @@ onMounted(() => {
   word-break: break-word;
 }
 
+/* 操作按钮靠右对齐（同图标/文字行） */
 .market-guide-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-top: var(--space-2);
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 授权验证码：独占一整行，位于按钮行下方 */
+.market-login-code {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-success);
+  border-radius: var(--radius);
+}
+
+.market-login-code-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.market-login-code-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.market-login-code-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--success);
+  user-select: all;
+}
+
+.market-login-code-row a {
+  text-decoration: none;
+  display: inline-flex;
 }
 
 .market-form {

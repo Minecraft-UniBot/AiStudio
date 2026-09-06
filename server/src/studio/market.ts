@@ -18,18 +18,19 @@
  * 每步完成后更新草稿元数据并通过 market.updated 事件广播（前端实时展示进度）。
  */
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { config, saveConfig } from '../core/config';
 import { logger } from '../core/logger';
@@ -172,6 +173,27 @@ function ghEnv(): Record<string, string> {
   return env;
 }
 
+/**
+ * 探测系统代理（gh 是 Go 程序，默认不读 macOS 系统代理，需显式注入 HTTPS_PROXY 才能连通 GitHub）：
+ * 优先读环境变量，其次 macOS 用 scutil --proxy 解析；探测不到返回 null。
+ */
+function detectHttpsProxy(): string | null {
+  const fromEnv = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (fromEnv) return fromEnv;
+  if (process.platform === 'darwin') {
+    try {
+      const raw = execFileSync('scutil', ['--proxy'], { encoding: 'utf-8', timeout: 3000 });
+      const host = raw.match(/HTTPSProxy\s*:\s*([^\s]+)/);
+      const port = raw.match(/HTTPSPort\s*:\s*(\d+)/);
+      const enabled = /HTTPSEnable\s*:\s*1/.test(raw);
+      if (enabled && host && port) return `http://${host[1]}:${port[1]}`;
+    } catch {
+      // scutil 不可用/超时：保持 null
+    }
+  }
+  return null;
+}
+
 /** gh 可执行文件名（Windows 带 .exe 后缀） */
 function ghBinName(): string {
   return process.platform === 'win32' ? 'gh.exe' : 'gh';
@@ -272,20 +294,21 @@ function buildGuidance(
   gitConfigured: boolean,
   ghAvailable: boolean,
   ghAuthed: boolean,
+  tokenConfigured: boolean,
 ): string {
   const lines: string[] = [];
   if (!gitConfigured) {
     lines.push(
-      '未检测到本地 git 身份，请先在终端执行：git config --global user.name "你的名字" 和 git config --global user.email "you@example.com"',
+      '未检测到本地 git 身份。请在「平台设置 → 插件市场」填写 GitHub 账号（owner）即可，发布时自动以该账号身份提交。',
     );
   }
   if (!ghAvailable) {
     lines.push(
-      '未安装 GitHub CLI（gh）。安装后执行 gh auth login 登录；或在下方「平台设置 → 插件市场」粘贴 GitHub Personal Access Token（需 repo 与 workflow 权限）。',
+      '未安装 GitHub CLI（gh）。请点击「自动安装」下载当前系统的安装包；安装后在下方粘贴 GitHub Personal Access Token（需 repo 与 workflow 权限）即可，无需在终端登录。',
     );
-  } else if (!ghAuthed) {
+  } else if (!ghAuthed && !tokenConfigured) {
     lines.push(
-      'gh 未登录。请在终端执行：gh auth login（选择 GitHub.com → HTTPS → 用浏览器登录），并确认提示中的「Authenticate Git with your GitHub credentials」。',
+      'gh 未登录。点击下方「登录 GitHub」后台完成授权；或粘贴 Personal Access Token（需 repo 与 workflow 权限）作为替代。',
     );
   }
   return lines.join('\n');
@@ -312,8 +335,10 @@ export async function getMarketStatus(): Promise<MarketStatus> {
   // gh CLI 是 repo create / release / fork / pr 的执行载体：未安装时即使配置了
   // token 也不算就绪（否则上传会在中途失败），引导用户先安装 gh。
   const owner = auth_source ? await resolveOwner() : null;
-  const ready = Boolean(gitConfigured && ghAvailable && auth_source && owner);
-  const guidance = ready ? null : buildGuidance(gitConfigured, ghAvailable, ghAuthed);
+  // 认证来源已是 'token' 时不要求 gh 本地登录态；git 身份缺失时提交会自动回退为
+  // owner 的 noreply 邮箱（见 executeMarketRun commit 步骤），因此不作为硬性门槛。
+  const ready = Boolean(ghAvailable && auth_source && owner);
+  const guidance = ready ? null : buildGuidance(gitConfigured, ghAvailable, ghAuthed, tokenConfigured);
 
   return {
     ready,
@@ -824,7 +849,8 @@ export async function getGhInstallInfo(): Promise<GhInstallInfo> {
 
 /**
  * 安装 GitHub CLI（gh）：从 cli/cli 最新 release 拉取当前系统的便携安装包，
- * 解压后把 gh 可执行文件放到用户目录（~/.local/share/gh-cli/bin），无需 sudo。
+ * 解压出 bin/gh 可执行文件放到用户目录（~/.local/share/gh-cli/bin），无需 sudo。
+ * 下载的安装包与解压临时目录均在 finally 中清理，不留残留。
  * 返回安装结果；安装目录未在 PATH 中时前端提示用户手动加入。
  */
 export async function installGhCli(): Promise<GhInstallInfo> {
@@ -840,9 +866,8 @@ export async function installGhCli(): Promise<GhInstallInfo> {
     return info;
   }
 
-  const staging = join(config.data_dir, '.gh-install');
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging, { recursive: true });
+  // 用系统临时目录做下载/解压中转，finally 中整体清理（含安装包与解压产物）
+  const staging = mkdtempSync(join(tmpdir(), 'unibot-gh-'));
   try {
     logger.info('market', '开始安装 GitHub CLI', {
       version: info.version,
@@ -853,7 +878,7 @@ export async function installGhCli(): Promise<GhInstallInfo> {
     const archive = join(staging, info.asset_name);
     await downloadFile(info.download_url, archive);
 
-    // 解压到 staging（zip 用 unzip，tar.gz 用 tar）
+    // 解压到临时目录（zip 用 unzip，tar.gz 用 tar）
     const extractDir = join(staging, 'extracted');
     mkdirSync(extractDir, { recursive: true });
     const isZip = info.asset_name.endsWith('.zip');
@@ -864,11 +889,11 @@ export async function installGhCli(): Promise<GhInstallInfo> {
       throw new Error(`解压失败：${extract.output.slice(-400)}`);
     }
 
-    // 在解压目录中定位 gh 可执行文件（zip/tar 顶层带 gh_<ver>_<os>_<arch>/ 目录）
+    // 压缩包固定顶层 gh_<ver>_<os>_<arch>/bin/<gh|gh.exe>，直接定位，无需深递归
     const sourceBin = findGhBinary(extractDir);
     if (!sourceBin) throw new Error('解压内容中未找到 gh 可执行文件');
 
-    // 复制到安装目录并赋予执行权限
+    // 只把 bin 可执行文件复制到安装目录并赋予执行权限
     mkdirSync(info.install_dir, { recursive: true });
     const target = info.bin_path;
     writeFileSync(target, readFileSync(sourceBin));
@@ -882,12 +907,14 @@ export async function installGhCli(): Promise<GhInstallInfo> {
     });
     return info;
   } catch (e) {
-    rmSync(staging, { recursive: true, force: true });
     throw new MarketError(`安装 GitHub CLI 失败：${(e as Error).message}`, 'GH_INSTALL_FAILED');
+  } finally {
+    // 无论成败都清理临时目录，避免残留安装包/解压产物
+    rmSync(staging, { recursive: true, force: true });
   }
 }
 
-/** 在解压目录中递归定位 gh 可执行文件（zip/tar 顶层带 gh_<ver>_<os>_<arch>/ 目录） */
+/** 在解压目录中定位 gh 可执行文件（zip/tar 顶层为 gh_<ver>_<os>_<arch>/bin/<gh>） */
 function findGhBinary(dir: string): string | null {
   const binName = ghBinName();
   for (const entry of readdirSync(dir)) {
@@ -902,24 +929,32 @@ function findGhBinary(dir: string): string | null {
   return null;
 }
 
-// ===== GitHub 登录（后台执行 gh auth login --web，前端展示 one-time code + URL） =====
+// ===== GitHub 登录（后台驱动 gh auth login，前端展示 one-time code + URL） =====
 
 export interface GhLoginInfo {
   /** 一次性验证码（用户在浏览器输入） */
   code: string;
   /** 浏览器授权地址 */
   url: string;
-  /** 登录进程是否仍在等待授权完成 */
+  /** 登录是否仍在此后端等待授权完成（进程存活中） */
   pending: boolean;
 }
 
-/** 当前正在进行的 gh 登录子进程（同一时刻只允许一个） */
-let activeLogin: { child: ReturnType<typeof spawn>; timer: ReturnType<typeof setTimeout> } | null = null;
+/**
+ * 登录用 gh 子进程句柄（保存以便取消；同一时刻仅一个登录进程）。
+ * gh 完成授权后自行退出并写入凭据，无需后端轮询。
+ */
+let activeLogin: ReturnType<typeof spawn> | null = null;
 
 /**
- * 后台启动 GitHub 登录：执行 `gh auth login --web`，捕获 one-time code 与授权 URL
- * 返回给前端展示，子进程保持运行等待用户在浏览器完成授权。
- * 前端展示 code + URL 后，用户打开 URL 输入 code 即完成登录；前端轮询 /market 检测登录态。
+ * 后台启动 GitHub 登录（device flow）：
+ * 运行 `gh auth login -p https --skip-ssh-key`，通过 stdin 预喂两次回车应答交互
+ * （默认：对 git 使用 GitHub 凭据=Yes；认证方式选默认的「Login with a web browser」），
+ * gh 随即向 GitHub 发起 device code 请求并打印 one-time code + 授权 URL。
+ *
+ * 注意：必须注入系统代理（gh 是 Go 程序，默认不读 macOS 系统代理）且**不能设
+ * GH_PROMPT_DISABLED=1**（否则 gh 静默等待、不打印验证码）。
+ * gh 子进程保持运行并自行完成授权轮询，授权成功后写入凭据并退出。
  */
 export async function startGhLogin(): Promise<GhLoginInfo> {
   // 已登录则直接返回（幂等）
@@ -927,15 +962,26 @@ export async function startGhLogin(): Promise<GhLoginInfo> {
   if (status.gh_authed) {
     throw new MarketError('GitHub 已登录，无需重复登录', 'GH_ALREADY_AUTHED');
   }
-  // 已有进行中的登录进程：返回其状态（避免重复启动）
-  if (activeLogin) {
+  // 已有进行中的登录进程：返回 pending 占位，避免重复启动
+  if (activeLogin && activeLogin.exitCode === null) {
     return { code: '', url: '', pending: true };
   }
+  activeLogin = null;
+
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: '0' };
+  const proxy = detectHttpsProxy();
+  if (proxy) {
+    env.HTTPS_PROXY = proxy;
+    env.HTTP_PROXY = proxy;
+  }
+  const loginEnv = { ...process.env, ...env };
 
   return new Promise((resolve, reject) => {
-    const child = spawn(ghBinPath(), ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', 'github.com'], {
-      env: { ...process.env, ...ghEnv() },
-    });
+    const child = spawn(
+      ghBinPath(),
+      ['auth', 'login', '-p', 'https', '--hostname', 'github.com', '--skip-ssh-key'],
+      { env: loginEnv, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
     let output = '';
     let settled = false;
     const finish = (info: GhLoginInfo) => {
@@ -949,46 +995,55 @@ export async function startGhLogin(): Promise<GhLoginInfo> {
       reject(new MarketError(message, 'GH_LOGIN_FAILED'));
     };
 
+    // 应答两个交互问题：先 Yes（Authenticate Git?），再回车选默认的浏览器登录
+    child.stdin.write('\n\n');
+
     child.stdout.on('data', (chunk: Buffer) => {
       output += chunk.toString();
-      // 解析 one-time code（格式：XXXX-XXXX）与授权 URL
-      const codeMatch = output.match(/one-time code:\s*([A-Z0-9-]{4,})/i);
-      const urlMatch = output.match(/https:\/\/github\.com\/login\/device/i);
-      if (codeMatch && urlMatch) {
-        finish({ code: codeMatch[1]!, url: urlMatch[0], pending: true });
-      }
+      parseGhCode(output, finish);
     });
     child.stderr.on('data', (chunk: Buffer) => {
       output += chunk.toString();
+      parseGhCode(output, finish);
     });
     child.on('error', (error) => {
       fail(`启动 gh 登录失败：${error.message}`);
     });
     child.on('close', (code) => {
-      // 进程提前退出（未捕获到 code/URL 或授权完成）：清理活动记录
-      if (activeLogin) {
-        clearTimeout(activeLogin.timer);
-        activeLogin = null;
-      }
+      if (activeLogin === child) activeLogin = null;
       if (!settled) {
-        fail(`gh 登录进程提前退出（code ${code ?? '?'}）：${output.slice(-300)}`);
+        fail(`gh 登录进程退出（code ${code ?? '?'}）：${output.slice(-300)}`);
       }
     });
 
-    // 记录活动进程；60s 内未捕获到 code/URL 视为失败
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      fail('gh 登录超时：未能获取一次性验证码，请重试');
-    }, 60_000);
-    activeLogin = { child, timer };
+    activeLogin = child;
+    // 30s 内未打印验证码视为失败（网络/交互异常），及时回收进程避免悬挂
+    const guard = setTimeout(() => {
+      if (!settled) {
+        child.kill('SIGKILL');
+        fail('gh 登录超时：未能获取一次性验证码，请检查网络后重试');
+      }
+    }, 30_000);
+    guard.unref();
+    child.once('close', () => clearTimeout(guard));
   });
 }
 
-/** 取消进行中的 gh 登录进程（前端关闭弹窗/放弃登录时调用） */
-export function cancelGhLogin(): void {
-  if (activeLogin) {
-    clearTimeout(activeLogin.timer);
-    activeLogin.child.kill('SIGKILL');
-    activeLogin = null;
+/** 从 gh 输出中解析 one-time code 与授权 URL；解析到则 resolve */
+function parseGhCode(output: string, finish: (info: GhLoginInfo) => void): void {
+  const code = output.match(/one-time code:\s*([A-Z0-9-]{4,})/i)?.[1];
+  const url = output.match(/https:\/\/github\.com\/login\/device/i)?.[0];
+  if (code && url) {
+    finish({ code, url, pending: true });
   }
 }
+
+/** 取消进行中的 gh 登录进程（前端放弃登录时调用） */
+export function cancelGhLogin(): void {
+  if (activeLogin && activeLogin.exitCode === null) {
+    activeLogin.kill('SIGKILL');
+  }
+  activeLogin = null;
+}
+
+

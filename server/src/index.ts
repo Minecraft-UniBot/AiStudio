@@ -1111,7 +1111,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return errorJson(`安装 GitHub CLI 失败：${(e as Error).message}`);
     }
   }
-  // 后台启动 GitHub 登录（gh auth login --web，返回 one-time code + URL 供前端展示）
+  // 后台启动 GitHub 登录（gh device flow，返回 one-time code + URL 供前端展示）
   if (path === '/api/studio/market/gh-login' && req.method === 'POST') {
     assertFeatureEnabled('market_publish');
     try {
@@ -1127,7 +1127,6 @@ async function handleRequest(req: Request): Promise<Response> {
     cancelGhLogin();
     return json({ ok: true });
   }
-
   // ---- 工具注册表（持久化到 config/tools.json，Plan 7.2） ----
   if (path === '/api/studio/tools') {
     if (req.method === 'GET') return json(getTools());
