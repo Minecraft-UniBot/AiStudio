@@ -7,7 +7,7 @@ UniBot 扩展校验脚本（Extension Studio 专属，位于 Studio 目录内）
 约束：
 - 本脚本位于 Studio 目录，不修改 UniBot 的任何文件
 - 只读复用 UniBot 的 Python 工具链（venv 内的 pydantic/toml/ruff/pytest）
-- 通过 sys.path 引入 Scripts.Extensions 包做清单校验与最小绑定测试
+- 通过 sys.path 引入扩展框架包（新版 `Core.Extension` / 旧版 `Scripts.Extensions`）做清单校验与最小绑定测试
 - 不调用 ExtensionManager / Loader 的完整加载流程（避免全局注册与状态污染）
 - import 边界检查：拒绝扩展导入框架内部注册表（Manager/Loader/Storage 等）
 
@@ -25,8 +25,14 @@ import sys
 import types
 from pathlib import Path
 
-# 框架内部注册表模块（扩展禁止导入）
-FORBIDDEN_IMPORTS = {
+# 框架内部模块前缀（扩展只能导入包根，禁止深入内部实现）；
+# 同时覆盖新版 Core.Extension 与已发布版本的 Scripts.Extensions 两套布局
+FORBIDDEN_IMPORT_PREFIXES = (
+    'Core.Extension.Runtime',
+    'Core.Extension.Market',
+    'Core.Extension.Storage',
+    'Core.Extension.Errors',
+    'Core.Extension.Extension',
     'Scripts.Extensions.Manager',
     'Scripts.Extensions.Loader',
     'Scripts.Extensions.Storage',
@@ -35,19 +41,50 @@ FORBIDDEN_IMPORTS = {
     'Scripts.Extensions.MarketManager',
     'Scripts.Extensions.Errors',
     'Scripts.Extensions.Base',
-}
+)
 
 STEPS: list[dict] = []
+
+_UNIBOT_ROOT: Path | None = None
+_FRAMEWORK_PACKAGE: str | None = None
 
 
 def _step(step_id: str, name: str, ok: bool, message: str = '', detail: str = '') -> None:
     STEPS.append({'id': step_id, 'name': name, 'ok': ok, 'message': message, 'detail': detail})
 
 
+def _framework_package() -> str:
+    """
+    扩展框架包前缀：新版 `Core.Extension`，回退已发布版本的 `Scripts.Extensions`。
+
+    以磁盘布局探测（而非试导入）判定，避免探测本身引入框架依赖副作用；
+    校验目标版本由 Studio 下载的 UniBot 测试环境决定。
+    """
+    global _FRAMEWORK_PACKAGE
+    if _FRAMEWORK_PACKAGE is None:
+        has_new_layout = _UNIBOT_ROOT is not None and (_UNIBOT_ROOT / 'Core' / 'Extension' / '__init__.py').exists()
+        _FRAMEWORK_PACKAGE = 'Core.Extension' if has_new_layout else 'Scripts.Extensions'
+    return _FRAMEWORK_PACKAGE
+
+
+def _framework():
+    """导入框架包根；两版包根均 re-export 校验所需的全部符号。"""
+    return importlib.import_module(_framework_package())
+
+
+def _is_forbidden_import(target: str) -> bool:
+    """判断被导入模块是否属于框架内部（前缀匹配，覆盖 `from X.Y import Z` 形态）。"""
+    return any(
+        target == prefix or target.startswith(f'{prefix}.')
+        for prefix in FORBIDDEN_IMPORT_PREFIXES
+    )
+
+
 def _check_manifest(ext_dir: Path) -> None:
     """清单 schema 校验 + id 与目录名一致（复用框架严格校验）。"""
-    from Scripts.Extensions.Base import parse_manifest
-    from Scripts.Extensions.Errors import ManifestError
+    framework = _framework()
+    parse_manifest = framework.parse_manifest
+    ManifestError = framework.ManifestError
 
     manifest_path = ext_dir / 'Extension.toml'
     if not manifest_path.exists():
@@ -75,8 +112,9 @@ def _check_manifest(ext_dir: Path) -> None:
 
 def _read_manifest(ext_dir: Path):
     """读取并解析清单；失败返回 None。"""
-    from Scripts.Extensions.Base import parse_manifest
-    from Scripts.Extensions.Errors import ManifestError
+    framework = _framework()
+    parse_manifest = framework.parse_manifest
+    ManifestError = framework.ManifestError
 
     manifest_path = ext_dir / 'Extension.toml'
     if not manifest_path.exists():
@@ -113,6 +151,9 @@ def _check_assets(ext_dir: Path) -> None:
     is_resources = 'resources' in names
     if not is_template and not is_resources:
         _step('assets', '模板/资源目录', True, '非无代码扩展，跳过')
+        return
+    if manifest is None:
+        _step('assets', '模板/资源目录', False, '清单缺失或无法解析')
         return
     if is_template and not manifest.template:
         _step('assets', '模板/资源目录', False, '清单缺少 [template] 配置')
@@ -152,7 +193,7 @@ def _check_syntax(ext_dir: Path) -> None:
                 target = node.names[0].name
             elif isinstance(node, ast.ImportFrom) and node.module:
                 target = node.module
-            if target and target in FORBIDDEN_IMPORTS:
+            if target and _is_forbidden_import(target):
                 errors.append(f'{py.relative_to(ext_dir)}: 禁止导入框架内部模块 {target}')
     if errors:
         _step('syntax', 'Python 语法与 import 边界', False, f'{len(errors)} 个问题', '\n'.join(errors))
@@ -232,9 +273,12 @@ def _check_loader(ext_dir: Path, unibot_root: Path) -> None:
     import tempfile
     import shutil
 
-    from Scripts.Extensions.Base import ExtensionMetadata, parse_manifest
-    from Scripts.Extensions.Errors import ManifestError
-    from Scripts.Extensions.Storage import ExtensionConfigStore, ExtensionDataStore
+    framework = _framework()
+    ExtensionMetadata = framework.ExtensionMetadata
+    parse_manifest = framework.parse_manifest
+    ManifestError = framework.ManifestError
+    ExtensionConfigStore = framework.ExtensionConfigStore
+    ExtensionDataStore = framework.ExtensionDataStore
 
     module_name = f'Extensions.{ext_dir.name}'
     sys.path.insert(0, str(unibot_root))
@@ -286,8 +330,9 @@ def _check_loader(ext_dir: Path, unibot_root: Path) -> None:
 
 def _check_dependencies(ext_dir: Path) -> None:
     """依赖声明检查：列出 python 依赖并确认合法。"""
-    from Scripts.Extensions.Base import parse_manifest
-    from Scripts.Extensions.Errors import ManifestError
+    framework = _framework()
+    parse_manifest = framework.parse_manifest
+    ManifestError = framework.ManifestError
 
     manifest_path = ext_dir / 'Extension.toml'
     try:
@@ -314,6 +359,8 @@ def _check_dependencies(ext_dir: Path) -> None:
 
 
 def main() -> int:
+    global _UNIBOT_ROOT
+
     parser = argparse.ArgumentParser(description='UniBot 扩展校验（Studio 专用）')
     parser.add_argument('ext_dir', type=Path, help='待校验的扩展目录（必须位于 UniBot 根目录之外）')
     parser.add_argument('--unibot-root', type=Path, required=True, help='UniBot 根目录')
@@ -342,12 +389,14 @@ def main() -> int:
             return 2
         except ValueError:
             pass
-    # 切换到 UniBot 根目录：Scripts.Config 等模块按相对路径（Config.toml）解析配置，
+    # 切换到 UniBot 根目录：框架配置模块按相对路径（Config.toml）解析配置，
     # 不依赖调用方 cwd（草稿工作区）
     os.chdir(unibot_root)
-    # 复用 UniBot venv：把 UniBot 根加入 sys.path 使 Scripts.* 可导入
+    # 复用 UniBot 环境：把 UniBot 根加入 sys.path 使框架包（Core.Extension /
+    # 旧版 Scripts.Extensions）与其依赖可导入；同时登记根目录供布局探测使用
     sys.path.insert(0, str(unibot_root))
-    # 提前初始化 NoneBot 运行时，使 Scripts.Config 的 get_plugin_config 可用
+    _UNIBOT_ROOT = unibot_root
+    # 提前初始化 NoneBot 运行时，使框架配置模块的 get_plugin_config 可用
     try:
         import nonebot
 

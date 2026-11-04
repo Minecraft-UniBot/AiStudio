@@ -275,6 +275,19 @@ export function syncUnibotEnv(): Promise<UnibotEnvStatus> {
   return ensureUnibotEnv(true);
 }
 
+/**
+ * 扩展框架包名：新版 `Core.Extension`，回退已发布版本的 `Scripts.Extensions`。
+ *
+ * 与校验脚本 validate_extension.py 的探测逻辑保持一致（按磁盘布局判定），
+ * 供提示词与草稿脚手架按实际测试环境版本生成正确的 import 语句。
+ */
+export function frameworkPackage(): string {
+  const root = config.unibot_env.test_dir;
+  return existsSync(join(root, 'Core', 'Extension', '__init__.py'))
+    ? 'Core.Extension'
+    : 'Scripts.Extensions';
+}
+
 /** 查询当前状态（实时探测磁盘，运行中任务返回其进行状态） */
 export function getUnibotEnvStatus(): UnibotEnvStatus {
   const root = config.unibot_env.test_dir;
